@@ -40,6 +40,11 @@ export function CelestialDust() {
     }
 
     function resize() {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       width = window.innerWidth;
       height = window.innerHeight;
@@ -74,6 +79,11 @@ export function CelestialDust() {
     }
 
     function tick() {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
       ctx.clearRect(0, 0, width, height);
       ctx.shadowBlur = 4;
       ctx.shadowColor = "rgba(245, 158, 11, 0.6)";
@@ -103,6 +113,11 @@ export function CelestialDust() {
     }
 
     function start() {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
       if (
         window.matchMedia("(prefers-reduced-motion: reduce)").matches ||
         document.visibilityState === "hidden"
