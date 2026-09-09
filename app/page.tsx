@@ -5,7 +5,7 @@ import { HowItWorks } from "@/components/home/HowItWorks";
 import { Philosophy } from "@/components/home/Philosophy";
 import { Privacy } from "@/components/home/Privacy";
 
-export default function Home() {
+export default function HomePage() {
   return (
     <main className="bg-transparent">
       <Hero />
