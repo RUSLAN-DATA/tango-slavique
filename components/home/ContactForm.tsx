@@ -1,7 +1,8 @@
 "use client";
 
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "framer-motion";
 import { FormEvent, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Container } from "@/components/ui/Container";
 import { FadeIn } from "@/components/ui/FadeIn";
 import { GlowCard } from "@/components/ui/GlowCard";
@@ -12,6 +13,7 @@ import {
   type CityKey,
   type QuizResult,
 } from "@/components/quiz/quizTypes";
+import { writeScreening } from "@/lib/screening";
 
 type FormState = {
   name: string;
@@ -47,12 +49,9 @@ export function ContactForm({
   quizResult = null,
   lookingForPreset = null,
 }: ContactFormProps) {
-  const { t, locale } = useLanguage();
+  const { t } = useLanguage();
+  const router = useRouter();
   const [form, setForm] = useState<FormState>(initialState);
-  const [submitted, setSubmitted] = useState(false);
-  const [sending, setSending] = useState(false);
-  const [submitError, setSubmitError] = useState("");
-  const [candidateCode, setCandidateCode] = useState("");
 
   useEffect(() => {
     if (!quizResult) {
@@ -88,88 +87,21 @@ export function ContactForm({
     }));
   }, [lookingForPreset]);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (sending) {
-      return;
-    }
-
-    const applicationId = `#TS-${Math.floor(1000 + Math.random() * 9000)}`;
-    const formData = {
+    const role = form.lookingFor === "man" ? "MAN" : "WOMAN";
+    const next = role === "MAN" ? "/apply/men/form" : "/apply/women/form";
+    writeScreening({
       name: form.name.trim(),
       phone: form.phone.trim(),
-      city: form.city ? t.form.cities[form.city] : "",
-      lookingFor: form.lookingFor === "man" ? t.form.man : t.form.woman,
-      privacyAccepted: form.privacy,
-      goal: form.goal ? t.quiz.goals[form.goal] : "",
-      geography: form.geography ? t.quiz.geography[form.geography] : "",
-      interviewReady: form.interviewReady ? t.quiz.interviewReady : "",
-      purpose: form.goal ? t.quiz.goals[form.goal] : "",
-      contact: form.name.trim(),
-      whatsapp: form.phone.trim(),
-      details: [
-        form.city ? t.form.cities[form.city] : "",
-        form.lookingFor === "man" ? t.form.man : form.lookingFor === "woman" ? t.form.woman : "",
-        form.geography ? t.quiz.geography[form.geography] : "",
-        form.interviewReady ? t.quiz.interviewReady : "",
-      ]
-        .filter(Boolean)
-        .join(" · "),
-      submittedAt: new Date().toISOString(),
-    };
-
-    const payload = {
-      ...formData,
-      language: locale.toUpperCase() || "EN",
-      applicationId,
-    };
-
-    setSubmitError("");
-    setSending(true);
-
-    try {
-      const response = await fetch("/api/application", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const data = (await response.json()) as {
-        success?: boolean;
-        id?: string;
-      };
-
-      if (!response.ok || !data.success) {
-        throw new Error("Application request failed");
-      }
-
-      setCandidateCode(data.id || applicationId);
-      setSubmitted(true);
-    } catch {
-      setSubmitError(t.form.submitError);
-    } finally {
-      setSending(false);
-    }
-  }
-
-  useEffect(() => {
-    if (!submitted) {
-      return;
-    }
-
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = previousOverflow;
-    };
-  }, [submitted]);
-
-  function returnToSite() {
-    setSubmitted(false);
-    setCandidateCode("");
-    setSubmitError("");
-    setForm(initialState);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+      city: form.city,
+      lookingFor: form.lookingFor || undefined,
+      goal: form.goal || undefined,
+      geography: form.geography || undefined,
+      interviewReady: form.interviewReady,
+      track: role,
+    });
+    router.push(`/register?role=${role}&next=${encodeURIComponent(next)}`);
   }
 
   return (
@@ -372,13 +304,8 @@ export function ContactForm({
                   </span>
                 </label>
 
-                {submitError ? (
-                  <p className="text-sm font-light text-rose-300">{submitError}</p>
-                ) : null}
-
                 <motion.button
                   type="submit"
-                  disabled={sending}
                   whileHover={{
                     y: -2,
                     boxShadow:
@@ -386,51 +313,13 @@ export function ContactForm({
                   }}
                   whileTap={{ scale: 0.985 }}
                   transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-                  className="w-full bg-gold py-3.5 text-[11px] font-medium uppercase tracking-[0.18em] text-obsidian transition-colors duration-500 hover:bg-gold-light disabled:cursor-wait disabled:opacity-60"
+                  className="w-full bg-gold py-3.5 text-[11px] font-medium uppercase tracking-[0.18em] text-obsidian transition-colors duration-500 hover:bg-gold-light"
                 >
-                  {t.form.submit}
+                  {t.platform.screening.continue}
                 </motion.button>
               </motion.form>
         </GlowCard>
       </Container>
-
-      <AnimatePresence>
-        {submitted ? (
-          <motion.div
-            key="application-received"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-            className="fixed inset-0 z-[60] flex items-center justify-center bg-[#070709]/80 px-4 backdrop-blur-md"
-          >
-            <motion.div
-              initial={{ opacity: 0, y: 18 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 10 }}
-              transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
-              className="w-full max-w-lg border border-amber-400/20 bg-[#0c0c10]/95 px-8 py-12 text-center shadow-[0_0_80px_rgba(201,165,92,0.08)] sm:px-12"
-            >
-              <h3 className="font-serif text-xl tracking-widest text-amber-200">
-                {t.form.successTitle}
-              </h3>
-              <p className="mt-6 font-mono text-lg tracking-[0.2em] text-amber-300">
-                {candidateCode}
-              </p>
-              <p className="mx-auto mt-8 max-w-md text-sm font-light leading-relaxed text-zinc-400">
-                {t.form.successText}
-              </p>
-              <button
-                type="button"
-                onClick={returnToSite}
-                className="mt-10 border border-amber-400/40 px-8 py-2.5 text-xs uppercase tracking-[0.2em] text-amber-200 transition-all duration-500 hover:border-amber-300 hover:bg-amber-400/10 hover:text-white hover:shadow-[0_0_20px_rgba(245,158,11,0.25)]"
-              >
-                {t.form.successReturn}
-              </button>
-            </motion.div>
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
     </section>
   );
 }

@@ -1,3 +1,5 @@
+import { platformEn, platformEs } from "@/lib/i18n/platform";
+
 export type Locale = "en" | "es";
 
 export const dictionaries = {
@@ -19,6 +21,8 @@ export const dictionaries = {
       apply: "APPLY NOW",
       openMenu: "Open menu",
       closeMenu: "Close menu",
+      login: "Sign in",
+      account: "Account",
     },
     hero: {
       badge: "Private matchmaking in Spain & Europe",
@@ -354,6 +358,7 @@ export const dictionaries = {
         "What is the format of a first meeting?",
       ],
     },
+    platform: platformEn,
   },
   es: {
     meta: {
@@ -373,6 +378,8 @@ export const dictionaries = {
       apply: "SOLICITAR AHORA",
       openMenu: "Abrir menú",
       closeMenu: "Cerrar menú",
+      login: "Entrar",
+      account: "Cuenta",
     },
     hero: {
       badge: "Matchmaking privado en España y Europa",
@@ -708,6 +715,7 @@ export const dictionaries = {
         "¿Cuál es el formato del primer encuentro?",
       ],
     },
+    platform: platformEs,
   },
 } as const;
 

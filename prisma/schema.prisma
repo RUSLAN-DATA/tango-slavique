@@ -1,0 +1,391 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  MATCHMAKER
+  ADMIN
+}
+
+enum ApplyTrack {
+  WOMAN
+  MAN
+}
+
+enum ApplicationStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  NEEDS_MORE_INFO
+  APPROVED
+  REJECTED
+  WITHDRAWN
+}
+
+enum MatchStatus {
+  PROPOSED
+  WAITING_FOR_USER_A
+  WAITING_FOR_USER_B
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  INTRODUCED
+  CLOSED
+}
+
+enum MatchResponseValue {
+  PENDING
+  ACCEPTED
+  DECLINED
+}
+
+enum IntroductionStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+}
+
+enum FeedbackInterest {
+  ANOTHER_MEETING
+  INTERESTED
+  UNSURE
+  NOT_INTERESTED
+}
+
+enum NotificationStatus {
+  UNREAD
+  READ
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+  CANCELLED
+}
+
+enum PaymentType {
+  ENROLMENT
+  MONTHLY
+}
+
+model User {
+  id              String      @id @default(cuid())
+  email           String      @unique
+  passwordHash    String
+  role            Role        @default(USER)
+  applyTrack      ApplyTrack?
+  emailVerifiedAt DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  lastLoginAt     DateTime?
+
+  profile            Profile?
+  application        Application?
+  partnerPreferences PartnerPreferences?
+  photos             ApplicationPhoto[]
+  matchesAsA         Match[]             @relation("MatchUserA")
+  matchesAsB         Match[]             @relation("MatchUserB")
+  matchResponses     MatchResponse[]
+  introductionsAsA   Introduction[]      @relation("IntroductionUserA")
+  introductionsAsB   Introduction[]      @relation("IntroductionUserB")
+  feedback           Feedback[]
+  notifications      Notification[]
+  payments           Payment[]
+  authoredNotes      AdminNote[]        @relation("AdminNoteAuthor")
+  notesAbout         AdminNote[]        @relation("AdminNoteSubject")
+  sessions           Session[]
+  verificationTokens VerificationToken[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  ipAddress String?
+  userAgent String?
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId, type])
+}
+
+model Profile {
+  id        String @id @default(cuid())
+  userId    String @unique
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  firstName String  @default("")
+  lastName  String  @default("")
+  phone     String?
+  dateOfBirth DateTime?
+  city      String?
+  country   String?
+
+  heightCm  Int?
+  weightKg  Int?
+  bodyType  String?
+  hairColor String?
+  eyeColor  String?
+
+  nationality   String?
+  maritalStatus String?
+  religion      String?
+  education     String?
+  profession    String?
+  annualIncome  String?
+  languages     String?
+
+  smoking        String?
+  alcohol        String?
+  children       String?
+  wantsChildren  String?
+
+  aboutMe                 String? @db.Text
+  hobbies                 String? @db.Text
+  lifeGoals               String? @db.Text
+  relationshipExperience  String? @db.Text
+
+  instagram String?
+  telegram  String?
+  howHeard  String?
+
+  isMember Boolean   @default(false)
+  memberAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Application {
+  id         String            @id @default(cuid())
+  publicCode String            @unique
+  userId     String            @unique
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  track      ApplyTrack
+  status     ApplicationStatus @default(DRAFT)
+  currentStep Int              @default(1)
+  language   String            @default("en")
+
+  quizGoal           String?
+  quizGeography       String?
+  quizInterviewReady Boolean?
+  lookingFor         String?
+
+  firstName   String  @default("")
+  lastName    String  @default("")
+  phone       String  @default("")
+  dateOfBirth DateTime?
+  city        String  @default("")
+  country     String  @default("")
+
+  heightCm  Int?
+  weightKg  Int?
+  bodyType  String?
+  hairColor String?
+  eyeColor  String?
+
+  nationality   String?
+  maritalStatus String?
+  religion      String?
+  education     String?
+  profession    String?
+  annualIncome  String?
+  languages     String?
+
+  smoking       String?
+  alcohol       String?
+  children      String?
+  wantsChildren String?
+
+  aboutMe                String? @db.Text
+  hobbies                String? @db.Text
+  lifeGoals              String? @db.Text
+  relationshipExperience String? @db.Text
+
+  instagram       String?
+  telegramHandle  String?
+  howHeard        String?
+
+  privacyAcceptedAt DateTime?
+  termsAcceptedAt   DateTime?
+  moreInfoRequest   String?   @db.Text
+  submittedAt       DateTime?
+  reviewedAt        DateTime?
+
+  photos   ApplicationPhoto[]
+  notes    AdminNote[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+}
+
+model PartnerPreferences {
+  id             String  @id @default(cuid())
+  userId         String  @unique
+  user           User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  applicationId  String? @unique
+
+  preferredAgeMin     Int?
+  preferredAgeMax     Int?
+  preferredHeightMin  Int?
+  preferredHeightMax  Int?
+  preferredBodyType   String?
+  minimumEducation    String?
+  importantQualities  String? @db.Text
+  dealBreakers        String? @db.Text
+
+  updatedAt DateTime @updatedAt
+}
+
+model ApplicationPhoto {
+  id            String       @id @default(cuid())
+  userId        String
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  applicationId String?
+  application   Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  storageKey    String
+  mimeType      String
+  byteSize      Int          @default(0)
+  createdAt     DateTime     @default(now())
+
+  @@index([userId])
+}
+
+model Match {
+  id                  String      @id @default(cuid())
+  userAId             String
+  userA               User        @relation("MatchUserA", fields: [userAId], references: [id], onDelete: Restrict)
+  userBId             String
+  userB               User        @relation("MatchUserB", fields: [userBId], references: [id], onDelete: Restrict)
+  createdById         String
+  status              MatchStatus @default(PROPOSED)
+  compatibilityScore  Int?
+  positiveFactors     Json?
+  potentialConflicts  Json?
+  preferenceMatches   Json?
+  preferenceConflicts Json?
+  expiresAt           DateTime?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  responses      MatchResponse[]
+  introductions  Introduction[]
+
+  @@index([userAId])
+  @@index([userBId])
+  @@index([status])
+}
+
+model MatchResponse {
+  id          String             @id @default(cuid())
+  matchId     String
+  match       Match              @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  value       MatchResponseValue @default(PENDING)
+  respondedAt DateTime?
+
+  @@unique([matchId, userId])
+}
+
+model Introduction {
+  id            String             @id @default(cuid())
+  matchId       String
+  match         Match              @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  userAId       String
+  userA         User               @relation("IntroductionUserA", fields: [userAId], references: [id], onDelete: Restrict)
+  userBId       String
+  userB         User               @relation("IntroductionUserB", fields: [userBId], references: [id], onDelete: Restrict)
+  status        IntroductionStatus  @default(PENDING)
+  scheduledAt   DateTime?
+  location      String?
+  format        String?
+  instructions  String?            @db.Text
+  privateNotes  String?            @db.Text
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  feedback      Feedback[]
+
+  @@index([matchId])
+}
+
+model Feedback {
+  id             String           @id @default(cuid())
+  introductionId String
+  introduction   Introduction     @relation(fields: [introductionId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  interest       FeedbackInterest
+  comment        String?          @db.Text
+  createdAt      DateTime         @default(now())
+
+  @@unique([introductionId, userId])
+}
+
+model Notification {
+  id        String             @id @default(cuid())
+  userId    String
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  body      String
+  status    NotificationStatus  @default(UNREAD)
+  href      String?
+  createdAt DateTime           @default(now())
+
+  @@index([userId, status])
+}
+
+model Payment {
+  id                     String        @id @default(cuid())
+  userId                 String
+  user                   User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type                   PaymentType
+  amountCents            Int
+  currency               String        @default("EUR")
+  status                 PaymentStatus @default(PENDING)
+  stripeCheckoutId       String?       @unique
+  stripePaymentIntentId String?
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+
+  @@index([userId])
+}
+
+model AdminNote {
+  id            String       @id @default(cuid())
+  subjectUserId String
+  subject       User         @relation("AdminNoteSubject", fields: [subjectUserId], references: [id], onDelete: Cascade)
+  authorId      String
+  author        User         @relation("AdminNoteAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  applicationId String?
+  application   Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  body          String       @db.Text
+  createdAt     DateTime     @default(now())
+
+  @@index([subjectUserId])
+}

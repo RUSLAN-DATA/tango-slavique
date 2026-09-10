@@ -1,0 +1,10 @@
+export const PRIVACY_POLICY_VERSION = "2026-09-01";
+export const SESSION_COOKIE = "ts_session";
+export const SESSION_DAYS = 14;
+export const EMAIL_VERIFY_HOURS = 24;
+export const PASSWORD_RESET_HOURS = 2;
+export const MATCH_PROPOSAL_DAYS = 14;
+export const PHOTO_MAX_BYTES = 5 * 1024 * 1024;
+export const PHOTO_MIME = ["image/jpeg", "image/png", "image/webp"] as const;
+export const ENROLMENT_AMOUNT_CENTS = 100_000;
+export const MONTHLY_AMOUNT_CENTS = 40_000;
