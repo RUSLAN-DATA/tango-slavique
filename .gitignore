@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+/worker/node_modules
 /.pnp
 .pnp.js
 .yarn/install-state.gz
@@ -28,6 +29,14 @@ yarn-error.log*
 # local env files
 .env
 .env*.local
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+
+# Cloudflare Wrangler
+.wrangler/
+**/.wrangler/
+.mf/
 
 # private member photographs
 /storage/private

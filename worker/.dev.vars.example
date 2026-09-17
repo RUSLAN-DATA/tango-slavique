@@ -1,0 +1,6 @@
+# Copy this file to .dev.vars for local `wrangler dev`.
+# Do not put real secrets in this example file. Never commit .dev.vars.
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_ADMIN_IDS=
+TELEGRAM_ADMIN_CHAT_ID=
+TELEGRAM_WEBHOOK_SECRET=
