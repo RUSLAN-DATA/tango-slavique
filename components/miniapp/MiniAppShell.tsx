@@ -5,6 +5,7 @@ import {
   getSessionToken,
   setSessionToken,
   workerRequest,
+  WORKER_URL,
 } from "@/lib/miniapp/api";
 
 type Tab =
@@ -38,7 +39,7 @@ const userTabs: { id: Tab; label: string }[] = [
   { id: "photos", label: "Photos" },
   { id: "matches", label: "Matches" },
   { id: "preferences", label: "Preferences" },
-  { id: "notifications", label: "Alerts" },
+  { id: "notifications", label: "Notifications" },
   { id: "settings", label: "Settings" },
 ];
 
@@ -62,6 +63,37 @@ function Field({
 const inputClass =
   "w-full border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-sm text-ivory outline-none";
 
+function PhotoThumb({ id }: { id: string }) {
+  const [src, setSrc] = useState("");
+  useEffect(() => {
+    let objectUrl = "";
+    async function load() {
+      const token = getSessionToken();
+      const response = await fetch(`${WORKER_URL}/api/photos/${id}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!response.ok) {
+        return;
+      }
+      objectUrl = URL.createObjectURL(await response.blob());
+      setSrc(objectUrl);
+    }
+    void load();
+    return () => {
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [id]);
+  if (!src) {
+    return <span className="text-ivory/40">…</span>;
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={src} alt="" className="h-14 w-14 object-cover" />
+  );
+}
+
 export function MiniAppShell() {
   const [tab, setTab] = useState<Tab>("profile");
   const [me, setMe] = useState<Me | null>(null);
@@ -70,11 +102,12 @@ export function MiniAppShell() {
   const [profile, setProfile] = useState<Record<string, string>>({});
   const [preferences, setPreferences] = useState<Record<string, string>>({});
   const [applications, setApplications] = useState<Array<Record<string, string>>>([]);
-  const [photos, setPhotos] = useState<Array<{ id: string; status: string }>>([]);
+  const [photos, setPhotos] = useState<Array<{ id: string; status: string; user_id?: string }>>([]);
   const [matches, setMatches] = useState<Array<Record<string, unknown>>>([]);
   const [notifications, setNotifications] = useState<Array<Record<string, string>>>([]);
   const [adminApps, setAdminApps] = useState<Array<Record<string, string>>>([]);
   const [adminProfiles, setAdminProfiles] = useState<Array<Record<string, string>>>([]);
+  const [adminPhotos, setAdminPhotos] = useState<Array<{ id: string; status: string; user_id?: string }>>([]);
   const [note, setNote] = useState("");
   const [noteUserId, setNoteUserId] = useState("");
   const [busy, setBusy] = useState(false);
@@ -96,7 +129,7 @@ export function MiniAppShell() {
         workerRequest<Record<string, string>>("/api/profile"),
         workerRequest<Record<string, string>>("/api/preferences"),
         workerRequest<{ items: Array<Record<string, string>> }>("/api/applications"),
-        workerRequest<{ items: Array<{ id: string; status: string }> }>("/api/photos"),
+        workerRequest<{ items: Array<{ id: string; status: string; user_id?: string }> }>("/api/photos"),
         workerRequest<{ items: Array<Record<string, unknown>> }>("/api/matches"),
         workerRequest<{ items: Array<Record<string, string>> }>("/api/notifications"),
       ]);
@@ -114,12 +147,14 @@ export function MiniAppShell() {
     setMatches(matchesRes.data?.items || []);
     setNotifications(notesRes.data?.items || []);
     if (meRes.data.role === "admin") {
-      const [list, profiles] = await Promise.all([
+      const [list, profiles, pendingPhotos] = await Promise.all([
         workerRequest<{ items: Array<Record<string, string>> }>("/api/applications"),
         workerRequest<{ items: Array<Record<string, string>> }>("/api/admin/profiles"),
+        workerRequest<{ items: Array<{ id: string; status: string; user_id?: string }> }>("/api/admin/photos"),
       ]);
       setAdminApps(list.data?.items || []);
       setAdminProfiles(profiles.data?.items || []);
+      setAdminPhotos(pendingPhotos.data?.items || []);
     }
     setLoading(false);
   }
@@ -259,11 +294,26 @@ export function MiniAppShell() {
             <Field label="First name">
               <input className={inputClass} value={profile.first_name || ""} onChange={(e) => setProfile({ ...profile, first_name: e.target.value })} />
             </Field>
+            <Field label="Last name">
+              <input className={inputClass} value={profile.last_name || ""} onChange={(e) => setProfile({ ...profile, last_name: e.target.value })} />
+            </Field>
+            <Field label="Birth date">
+              <input type="date" className={inputClass} value={profile.birth_date || ""} onChange={(e) => setProfile({ ...profile, birth_date: e.target.value })} />
+            </Field>
             <Field label="City">
               <input className={inputClass} value={profile.city || ""} onChange={(e) => setProfile({ ...profile, city: e.target.value })} />
             </Field>
+            <Field label="Country">
+              <input className={inputClass} value={profile.country || ""} onChange={(e) => setProfile({ ...profile, country: e.target.value })} />
+            </Field>
             <Field label="Gender">
               <input className={inputClass} value={profile.gender || ""} onChange={(e) => setProfile({ ...profile, gender: e.target.value })} />
+            </Field>
+            <Field label="Occupation">
+              <input className={inputClass} value={profile.occupation || ""} onChange={(e) => setProfile({ ...profile, occupation: e.target.value })} />
+            </Field>
+            <Field label="Languages">
+              <input className={inputClass} value={profile.languages || ""} onChange={(e) => setProfile({ ...profile, languages: e.target.value })} />
             </Field>
             <Field label="About">
               <textarea className={inputClass} rows={4} value={profile.about || ""} onChange={(e) => setProfile({ ...profile, about: e.target.value })} />
@@ -303,9 +353,24 @@ export function MiniAppShell() {
           <div className="space-y-4">
             {photos.length ? (
               photos.map((photo) => (
-                <div key={photo.id} className="flex items-center justify-between border border-white/10 px-3 py-2 text-sm">
-                  <span className="text-ivory/80">{photo.id.slice(0, 8)}</span>
-                  <span className="uppercase tracking-[0.14em] text-gold">{photo.status}</span>
+                <div key={photo.id} className="flex items-center justify-between gap-3 border border-white/10 px-3 py-2 text-sm">
+                  <div className="flex items-center gap-3">
+                    <PhotoThumb id={photo.id} />
+                    <span className="uppercase tracking-[0.14em] text-gold">{photo.status}</span>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={async () => {
+                      setBusy(true);
+                      await workerRequest(`/api/photos/${photo.id}`, { method: "DELETE" });
+                      setBusy(false);
+                      await refresh();
+                    }}
+                    className="text-[10px] uppercase tracking-[0.14em] text-ivory/60"
+                  >
+                    Delete
+                  </button>
                 </div>
               ))
             ) : (
@@ -327,6 +392,40 @@ export function MiniAppShell() {
                 <article key={String(match.id)} className="border border-white/10 p-4 text-sm">
                   <p>Score: {String(match.score ?? "—")}</p>
                   <p className="uppercase tracking-[0.14em] text-gold">{String(match.status)}</p>
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={async () => {
+                        setBusy(true);
+                        await workerRequest(`/api/matches/${String(match.id)}/respond`, {
+                          method: "POST",
+                          body: JSON.stringify({ response: "accept" }),
+                        });
+                        setBusy(false);
+                        await refresh();
+                      }}
+                      className="border border-gold px-2 py-1 text-[10px] uppercase text-gold"
+                    >
+                      Accept
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={async () => {
+                        setBusy(true);
+                        await workerRequest(`/api/matches/${String(match.id)}/respond`, {
+                          method: "POST",
+                          body: JSON.stringify({ response: "decline" }),
+                        });
+                        setBusy(false);
+                        await refresh();
+                      }}
+                      className="border border-white/20 px-2 py-1 text-[10px] uppercase"
+                    >
+                      Decline
+                    </button>
+                  </div>
                 </article>
               ))}
             </div>
@@ -341,6 +440,10 @@ export function MiniAppShell() {
             <Field label="City"><input className={inputClass} value={preferences.city || ""} onChange={(e) => setPreferences({ ...preferences, city: e.target.value })} /></Field>
             <Field label="Age min"><input className={inputClass} value={preferences.age_min || ""} onChange={(e) => setPreferences({ ...preferences, age_min: e.target.value })} /></Field>
             <Field label="Age max"><input className={inputClass} value={preferences.age_max || ""} onChange={(e) => setPreferences({ ...preferences, age_max: e.target.value })} /></Field>
+            <Field label="Marital status"><input className={inputClass} value={preferences.marital_status || ""} onChange={(e) => setPreferences({ ...preferences, marital_status: e.target.value })} /></Field>
+            <Field label="Children"><input className={inputClass} value={preferences.children || ""} onChange={(e) => setPreferences({ ...preferences, children: e.target.value })} /></Field>
+            <Field label="Languages"><input className={inputClass} value={preferences.languages || ""} onChange={(e) => setPreferences({ ...preferences, languages: e.target.value })} /></Field>
+            <Field label="Intent"><input className={inputClass} value={preferences.intent || ""} onChange={(e) => setPreferences({ ...preferences, intent: e.target.value })} /></Field>
             <button disabled={busy} className="w-full bg-gold px-4 py-3 text-xs uppercase tracking-[0.16em] text-black">Save preferences</button>
           </form>
         ) : null}
@@ -359,9 +462,19 @@ export function MiniAppShell() {
         ) : null}
 
         {tab === "settings" ? (
-          <div className="space-y-2 text-sm text-ivory/70">
+          <div className="space-y-4 text-sm text-ivory/70">
             <p>Role: {me.role}</p>
             <p>Status: {me.status}</p>
+            <button
+              type="button"
+              onClick={() => {
+                setSessionToken(null);
+                setMe(null);
+              }}
+              className="w-full border border-white/20 px-4 py-3 text-xs uppercase tracking-[0.16em]"
+            >
+              Sign out
+            </button>
           </div>
         ) : null}
 
@@ -390,6 +503,67 @@ export function MiniAppShell() {
                 </article>
               ))}
             </section>
+            <section>
+              <h2 className="mb-3 font-display text-xl">Photos</h2>
+              {adminPhotos.length ? (
+                adminPhotos.map((photo) => (
+                  <article key={photo.id} className="mb-3 flex items-center justify-between gap-3 border border-white/10 p-3 text-sm">
+                    <div>
+                      <PhotoThumb id={photo.id} />
+                      <p className="mt-1 text-ivory/50">{photo.user_id}</p>
+                      <p className="text-gold">{photo.status}</p>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={async () => {
+                          setBusy(true);
+                          await workerRequest(`/api/photos/${photo.id}/approve`, { method: "POST" });
+                          setBusy(false);
+                          await refresh();
+                        }}
+                        className="border border-gold px-2 py-1 text-[10px] uppercase text-gold"
+                      >
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={async () => {
+                          setBusy(true);
+                          await workerRequest(`/api/photos/${photo.id}/reject`, { method: "POST" });
+                          setBusy(false);
+                          await refresh();
+                        }}
+                        className="border border-white/20 px-2 py-1 text-[10px] uppercase"
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </article>
+                ))
+              ) : (
+                <p className="text-sm text-ivory/60">No photos yet.</p>
+              )}
+            </section>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                const result = await workerRequest<{ created: number; users?: number }>(
+                  "/api/admin/matches/run",
+                  { method: "POST", body: JSON.stringify({}) }
+                );
+                setBusy(false);
+                setError(result.ok ? "" : result.error?.message || "Matching failed");
+                await refresh();
+              }}
+              className="w-full border border-gold px-4 py-3 text-xs uppercase tracking-[0.16em] text-gold"
+            >
+              Run matching
+            </button>
             <form
               className="space-y-3"
               onSubmit={async (event) => {

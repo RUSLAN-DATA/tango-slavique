@@ -3,8 +3,10 @@ import { hmacSha256, hmacSha256Hex, timingSafeEqual } from "./crypto";
 import { parseTelegramAdminIds, isTelegramAdmin } from "./telegram/adminIds";
 import { validateTelegramInitData } from "./auth/telegramInitData";
 import { validateApplicationInput } from "./applications/validate";
-import { validatePhoto } from "./photos/validate";
+import { validatePhoto, detectImageType } from "./photos/validate";
 import { calculateMatchScore } from "./matches/score";
+import { handleTelegramWebhook } from "./telegram/webhook";
+import type { Env } from "./env";
 
 describe("admin IDs", () => {
   it("parses comma-separated numeric IDs", () => {
@@ -48,6 +50,13 @@ describe("application validation", () => {
       expect(result.phone).toBe("+34600000000");
     }
   });
+
+  it("requires both a name and a contact method", () => {
+    expect("error" in validateApplicationInput({ name: "Anna" })).toBe(true);
+    expect("error" in validateApplicationInput({ phone: "+34600000000" })).toBe(
+      true
+    );
+  });
 });
 
 describe("photo validation", () => {
@@ -61,6 +70,20 @@ describe("photo validation", () => {
     expect(validatePhoto({ type: "image/png", size: 11 * 1024 * 1024 }).ok).toBe(
       false
     );
+  });
+
+  it("detects jpeg png and webp magic bytes", () => {
+    expect(detectImageType(new Uint8Array([0xff, 0xd8, 0xff, 0xe0]).buffer)?.ext).toBe(
+      "jpg"
+    );
+    expect(
+      detectImageType(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).buffer)
+        ?.ext
+    ).toBe("png");
+    const webp = new Uint8Array(12);
+    webp.set([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]);
+    expect(detectImageType(webp.buffer)?.ext).toBe("webp");
+    expect(detectImageType(new Uint8Array([0x47, 0x49, 0x46]).buffer)).toBeNull();
   });
 });
 
@@ -124,5 +147,46 @@ describe("telegram initData", () => {
         "auth_date=1&hash=deadbeef&user=%7B%22id%22%3A1%7D"
       )
     ).rejects.toThrow("INVALID_INIT_DATA");
+  });
+});
+
+describe("telegram webhook", () => {
+  const env = {
+    TELEGRAM_WEBHOOK_SECRET: "expected-secret",
+  } as Env;
+
+  it("rejects requests without the secret header", async () => {
+    const response = await handleTelegramWebhook(
+      new Request("https://example.com/api/telegram/webhook", {
+        method: "POST",
+        body: "{}",
+      }),
+      env
+    );
+    expect(response.status).toBe(401);
+  });
+
+  it("rejects requests with the wrong secret", async () => {
+    const response = await handleTelegramWebhook(
+      new Request("https://example.com/api/telegram/webhook", {
+        method: "POST",
+        headers: { "X-Telegram-Bot-Api-Secret-Token": "wrong" },
+        body: "{}",
+      }),
+      env
+    );
+    expect(response.status).toBe(401);
+  });
+
+  it("accepts a valid secret and empty update", async () => {
+    const response = await handleTelegramWebhook(
+      new Request("https://example.com/api/telegram/webhook", {
+        method: "POST",
+        headers: { "X-Telegram-Bot-Api-Secret-Token": "expected-secret" },
+        body: JSON.stringify({ update_id: 1 }),
+      }),
+      env
+    );
+    expect(response.status).toBe(200);
   });
 });

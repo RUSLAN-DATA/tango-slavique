@@ -5,6 +5,7 @@ import {
   updateApplicationStatus,
   type ApplicationStatus,
 } from "../applications/service";
+import { runMatchingForUser } from "../matches/service";
 import { isTelegramAdmin, parseTelegramAdminIds } from "./adminIds";
 import { answerTelegramCallbackQuery, sendTelegramMessage } from "./api";
 
@@ -83,6 +84,7 @@ export async function handleAdminCallback(
     )
       .bind(nowIso(), application.user_id)
       .run();
+    await runMatchingForUser(env, application.user_id).catch(() => 0);
   }
 
   await env.DB.prepare(

@@ -10,6 +10,7 @@ import {
 } from "./http";
 import { enforceRateLimit } from "./rateLimit";
 import { handleApi } from "./routes";
+import { ensureTelegramRuntime } from "./telegram/setup";
 import { handleTelegramWebhook } from "./telegram/webhook";
 
 function healthResponse(): Response {
@@ -24,12 +25,13 @@ function healthResponse(): Response {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
 
     if (path === "/api/health") {
       if (request.method === "GET") {
+        ctx.waitUntil(ensureTelegramRuntime(env));
         return healthResponse();
       }
       if (request.method === "HEAD") {
@@ -66,7 +68,7 @@ export default {
 
     const limitedPaths: Record<string, number> = {
       "/api/auth/telegram": 20,
-      "/api/applications": 10,
+      "/api/applications": 60,
       "/api/photos": 15,
     };
     if (request.method !== "GET" && limitedPaths[path]) {

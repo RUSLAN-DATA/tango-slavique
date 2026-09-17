@@ -99,3 +99,17 @@ export async function runMatchingForUser(
   }
   return created;
 }
+
+export async function runMatchingForAll(
+  env: Env
+): Promise<{ created: number; users: number }> {
+  const people = await env.DB.prepare(
+    "SELECT user_id FROM profiles WHERE status = 'public'"
+  ).all<{ user_id: string }>();
+  const rows = people.results || [];
+  let created = 0;
+  for (const row of rows) {
+    created += await runMatchingForUser(env, row.user_id);
+  }
+  return { created, users: rows.length };
+}

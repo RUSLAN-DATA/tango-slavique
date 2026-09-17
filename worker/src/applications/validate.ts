@@ -33,7 +33,7 @@ export function validateApplicationInput(
   );
   const source = asText(body.source, 40) || "website";
 
-  if (!name && !phone && !email) {
+  if (!name || (!phone && !email)) {
     return { error: "Provide a name and at least one contact method." };
   }
 

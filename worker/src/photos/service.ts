@@ -1,6 +1,6 @@
 import type { Env } from "../env";
 import { newId, nowIso } from "../crypto";
-import { validatePhoto } from "./validate";
+import { detectImageType, validatePhoto } from "./validate";
 
 export type PhotoRow = {
   id: string;
@@ -21,15 +21,22 @@ export async function saveUserPhoto(
 ): Promise<PhotoRow> {
   const check = validatePhoto({ type: file.type, size: file.size });
   if (!check.ok) {
-    throw new Error(check.message);
+    throw new Error(`VALIDATION_ERROR:${check.message}`);
+  }
+
+  const bytes = await file.arrayBuffer();
+  const detected = detectImageType(bytes);
+  if (!detected) {
+    throw new Error(
+      "VALIDATION_ERROR:Only JPEG, PNG and WEBP images are allowed."
+    );
   }
 
   const id = newId();
-  const ext = check.ext;
+  const ext = detected.ext;
   const r2Key = `users/${userId}/${id}.${ext}`;
-  const bytes = await file.arrayBuffer();
   await env.PHOTOS.put(r2Key, bytes, {
-    httpMetadata: { contentType: check.mime },
+    httpMetadata: { contentType: detected.mime },
   });
 
   const originalName = (file.name || "photo").slice(0, 120);
@@ -49,7 +56,7 @@ export async function saveUserPhoto(
       userId,
       r2Key,
       originalName,
-      check.mime,
+      detected.mime,
       file.size,
       sort?.count || 0,
       now
@@ -104,6 +111,7 @@ export async function setPhotoStatus(
 export function publicPhotoView(photo: PhotoRow) {
   return {
     id: photo.id,
+    user_id: photo.user_id,
     status: photo.status,
     mime_type: photo.mime_type,
     size: photo.size,

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { clientKey, rateLimit } from "@/lib/rate-limit";
 
 const WORKER_URL =
   process.env.WORKER_URL ||
@@ -21,6 +22,14 @@ function firstValue(...values: unknown[]) {
 
 export async function POST(req: NextRequest) {
   try {
+    const limited = rateLimit(clientKey(req, "application"), 8, 60_000);
+    if (!limited.ok) {
+      return NextResponse.json(
+        { success: false, error: "Too many requests" },
+        { status: 429 }
+      );
+    }
+
     const body = (await req.json()) as Record<string, unknown>;
     const name = firstValue(body.contact, body.name);
     const phone = firstValue(body.phone, body.whatsapp);
@@ -57,7 +66,11 @@ export async function POST(req: NextRequest) {
     });
 
     const payload = (await workerResponse.json().catch(() => null)) as
-      | { ok?: boolean; data?: { id?: string }; error?: { message?: string } }
+      | {
+          ok?: boolean;
+          data?: { id?: string; notified?: boolean };
+          error?: { message?: string };
+        }
       | null;
 
     if (!workerResponse.ok || !payload?.ok) {
@@ -73,7 +86,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       id: payload.data?.id,
-      notified: true,
+      notified: Boolean(payload.data?.notified),
     });
   } catch (error: unknown) {
     console.error("[Application Route Exception]");

@@ -9,7 +9,7 @@ import {
   updateApplicationStatus,
 } from "./applications/service";
 import { validateApplicationInput } from "./applications/validate";
-import { runMatchingForUser } from "./matches/service";
+import { runMatchingForAll, runMatchingForUser } from "./matches/service";
 import {
   deletePhoto,
   getPhoto,
@@ -95,6 +95,11 @@ export async function handleApi(
       }
       if (message === "INVALID_JSON") {
         return withCors(apiError("VALIDATION_ERROR", "Invalid JSON", 400));
+      }
+      if (message.startsWith("VALIDATION_ERROR:")) {
+        return withCors(
+          apiError("VALIDATION_ERROR", message.slice("VALIDATION_ERROR:".length), 400)
+        );
       }
       console.error("API error");
       return withCors(apiError("INTERNAL_ERROR", "Request failed", 500));
@@ -488,9 +493,44 @@ export async function handleApi(
 
   if (path === "/api/admin/matches/run" && method === "POST") {
     return wrap(async () => {
-      const user = await requireAdmin(env, request);
-      const created = await runMatchingForUser(env, user.id);
-      return apiOk({ created });
+      await requireAdmin(env, request);
+      let body: Record<string, unknown> = {};
+      try {
+        body = await readJson(request);
+      } catch {
+        body = {};
+      }
+      const targetUserId =
+        typeof body.user_id === "string" && /^[a-f0-9]+$/i.test(body.user_id)
+          ? body.user_id
+          : "";
+      if (targetUserId) {
+        const created = await runMatchingForUser(env, targetUserId);
+        return apiOk({ created, user_id: targetUserId });
+      }
+      const result = await runMatchingForAll(env);
+      return apiOk(result);
+    });
+  }
+
+  if (path === "/api/admin/photos" && method === "GET") {
+    return wrap(async () => {
+      await requireAdmin(env, request);
+      const rows = await env.DB.prepare(
+        "SELECT * FROM photos ORDER BY created_at DESC LIMIT 100"
+      ).all();
+      const items = (rows.results || []) as Array<{
+        id: string;
+        user_id: string;
+        r2_key: string;
+        original_name: string | null;
+        mime_type: string;
+        size: number;
+        sort_order: number;
+        status: string;
+        created_at: string;
+      }>;
+      return apiOk({ items: items.map(publicPhotoView) });
     });
   }
 
@@ -506,11 +546,24 @@ export async function handleApi(
       if (!match || (match.user_id !== user.id && match.matched_user_id !== user.id && !isAdminUser(env, user))) {
         return apiError("NOT_FOUND", "Match not found", 404);
       }
-      await env.DB.prepare(
-        "INSERT INTO match_responses (id, match_id, user_id, response, created_at) VALUES (?, ?, ?, ?, ?)"
+      const existing = await env.DB.prepare(
+        "SELECT id FROM match_responses WHERE match_id = ? AND user_id = ?"
       )
-        .bind(newId(), match.id, user.id, response, nowIso())
-        .run();
+        .bind(match.id, user.id)
+        .first<{ id: string }>();
+      if (existing) {
+        await env.DB.prepare(
+          "UPDATE match_responses SET response = ? WHERE id = ?"
+        )
+          .bind(response, existing.id)
+          .run();
+      } else {
+        await env.DB.prepare(
+          "INSERT INTO match_responses (id, match_id, user_id, response, created_at) VALUES (?, ?, ?, ?, ?)"
+        )
+          .bind(newId(), match.id, user.id, response, nowIso())
+          .run();
+      }
       return apiOk({ match_id: match.id, response });
     });
   }

@@ -68,9 +68,6 @@ export async function requireUser(env: Env, request: Request): Promise<AppUser> 
 }
 
 export function isAdminUser(env: Env, user: AppUser): boolean {
-  if (user.role === "admin") {
-    return true;
-  }
   return isTelegramAdmin(
     parseTelegramAdminIds(env.TELEGRAM_ADMIN_IDS),
     user.telegram_user_id
