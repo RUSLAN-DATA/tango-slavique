@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { HashLink } from "@/components/ui/HashLink";
 import { useLanguage } from "@/lib/i18n/LanguageProvider";
 
@@ -45,6 +46,10 @@ function LinkRow({
 
 export function Footer() {
   const { t } = useLanguage();
+  const pathname = usePathname();
+  if (pathname?.startsWith("/miniapp")) {
+    return null;
+  }
 
   const nav = [
     { href: "/#club", label: t.footer.nav.about, hash: true },

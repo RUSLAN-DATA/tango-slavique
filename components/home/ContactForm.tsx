@@ -52,6 +52,7 @@ export function ContactForm({
   const { t } = useLanguage();
   const router = useRouter();
   const [form, setForm] = useState<FormState>(initialState);
+  const [submitError, setSubmitError] = useState("");
 
   useEffect(() => {
     if (!quizResult) {
@@ -87,8 +88,9 @@ export function ContactForm({
     }));
   }, [lookingForPreset]);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setSubmitError("");
     const role = form.lookingFor === "man" ? "MAN" : "WOMAN";
     const next = role === "MAN" ? "/apply/men/form" : "/apply/women/form";
     writeScreening({
@@ -101,6 +103,32 @@ export function ContactForm({
       interviewReady: form.interviewReady,
       track: role,
     });
+    try {
+      const response = await fetch("/api/application", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: form.name.trim(),
+          phone: form.phone.trim(),
+          city: form.city,
+          lookingFor: form.lookingFor,
+          goal: form.goal,
+          geography: form.geography,
+          interviewReady: form.interviewReady,
+          source: "website",
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { success?: boolean }
+        | null;
+      if (!response.ok || !payload?.success) {
+        setSubmitError("Application could not be saved. Please try again.");
+        return;
+      }
+    } catch {
+      setSubmitError("Application could not be saved. Please try again.");
+      return;
+    }
     router.push(`/register?role=${role}&next=${encodeURIComponent(next)}`);
   }
 
@@ -303,6 +331,10 @@ export function ContactForm({
                     {t.form.privacySuffix}
                   </span>
                 </label>
+
+                {submitError ? (
+                  <p className="text-sm text-red-300">{submitError}</p>
+                ) : null}
 
                 <motion.button
                   type="submit"

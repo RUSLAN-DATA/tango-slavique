@@ -5,6 +5,7 @@ import { Send, Sparkles, X } from "lucide-react";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { HashLink } from "@/components/ui/HashLink";
 import { useLanguage } from "@/lib/i18n/LanguageProvider";
+import { usePathname } from "next/navigation";
 
 type ChatRole = "user" | "assistant";
 
@@ -20,6 +21,7 @@ function createId() {
 
 export function ChatWidget() {
   const { t } = useLanguage();
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
@@ -103,6 +105,10 @@ export function ChatWidget() {
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     void sendMessage(input);
+  }
+
+  if (pathname?.startsWith("/miniapp")) {
+    return null;
   }
 
   return (

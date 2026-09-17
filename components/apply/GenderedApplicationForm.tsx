@@ -28,9 +28,11 @@ export function GenderedApplicationForm({
     track === "men" ? "woman" : "man"
   );
   const [privacy, setPrivacy] = useState(false);
+  const [submitError, setSubmitError] = useState("");
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setSubmitError("");
 
     const resolvedCity =
       track === "women"
@@ -46,6 +48,32 @@ export function GenderedApplicationForm({
       lookingFor: track === "men" ? lookingFor : undefined,
       track: track === "men" ? "MAN" : "WOMAN",
     });
+
+    try {
+      const response = await fetch("/api/application", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          phone: phone.trim(),
+          city: resolvedCity,
+          age,
+          lookingFor: track === "men" ? lookingFor : undefined,
+          applicant: track === "men" ? "MAN" : "WOMAN",
+          source: "website",
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { success?: boolean }
+        | null;
+      if (!response.ok || !payload?.success) {
+        setSubmitError("Application could not be saved. Please try again.");
+        return;
+      }
+    } catch {
+      setSubmitError("Application could not be saved. Please try again.");
+      return;
+    }
 
     const role = track === "men" ? "MAN" : "WOMAN";
     const next = track === "men" ? "/apply/men/form" : "/apply/women/form";
@@ -208,6 +236,10 @@ export function GenderedApplicationForm({
             {t.form.privacySuffix}
           </span>
         </label>
+
+        {submitError ? (
+          <p className="text-sm text-red-300">{submitError}</p>
+        ) : null}
 
         <motion.button
           type="submit"

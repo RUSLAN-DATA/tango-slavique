@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Menu, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { HeaderAuth } from "@/components/layout/HeaderAuth";
 import { HashLink } from "@/components/ui/HashLink";
@@ -14,6 +15,7 @@ const ease = [0.22, 1, 0.36, 1] as const;
 
 export function Header() {
   const { t } = useLanguage();
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
   const navItems = [
@@ -58,6 +60,10 @@ export function Header() {
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
+
+  if (pathname?.startsWith("/miniapp")) {
+    return null;
+  }
 
   return (
     <header className="pointer-events-none fixed inset-x-0 top-0 z-[80]">
