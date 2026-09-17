@@ -3,8 +3,8 @@ main = "src/index.ts"
 compatibility_date = "2026-09-17"
 
 # Secrets (TELEGRAM_BOT_TOKEN, TELEGRAM_ADMIN_IDS, TELEGRAM_ADMIN_CHAT_ID,
-# TELEGRAM_WEBHOOK_SECRET) are set in the Cloudflare dashboard / `wrangler secret`.
-# Never put them here.
+# TELEGRAM_WEBHOOK_SECRET, GEMINI_API_KEY) are set in the Cloudflare dashboard
+# / `wrangler secret`. Never put them here.
 
 [vars]
 MINIAPP_URL = "https://tango.bavariagloss.de/miniapp"

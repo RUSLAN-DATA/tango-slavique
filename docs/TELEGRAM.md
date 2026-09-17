@@ -10,12 +10,22 @@ Mini App: `https://tango.bavariagloss.de/miniapp`
 - `TELEGRAM_WEBHOOK_SECRET`
 - `TELEGRAM_ADMIN_IDS` (comma-separated numeric user IDs)
 - `TELEGRAM_ADMIN_CHAT_ID` (admin group chat ID)
+- `GEMINI_API_KEY` (optional; AI photo review and blog translation)
 
 Webhook requests must send `X-Telegram-Bot-Api-Secret-Token` matching `TELEGRAM_WEBHOOK_SECRET`. Invalid or missing secret → HTTP 401.
 
-The Worker does not echo ordinary group messages. Private `/start` replies with an inline button that opens the Mini App. Other private messages get a short status reply.
+Admin Telegram is the primary control surface. `/start` for an admin opens Mini App plus Applications / Profiles / Blog buttons.
 
-Admin callbacks on application notifications: Open / Approve / Reject / Request information. Only IDs in `TELEGRAM_ADMIN_IDS` can execute those actions. Callback data is not trusted without a server-side admin check. Approving an application with a linked user marks the profile public and runs matching.
+New profiles notify the admin group with View / Approve / Reject / Need info.
+
+Photo + text in the admin chat:
+- long text → blog draft (EN/ES buttons, then Publish)
+- “Maria profile photo” → attach to that profile, or ask which profile
+- “New profile Maria” → create a draft profile and attach the photo
+
+AI photo review (Gemini, if `GEMINI_API_KEY` is set on the Worker) flags unclear photos to the admin. Human buttons always win. If Gemini is unavailable, photos still save.
+
+The Worker does not reply to ordinary group chatter.
 
 ## Mini App auth
 

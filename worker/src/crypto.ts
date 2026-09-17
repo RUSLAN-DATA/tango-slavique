@@ -15,7 +15,11 @@ export function timingSafeEqual(a: string, b: string): boolean {
 }
 
 export async function sha256Hex(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", encoder.encode(value));
+  return sha256Bytes(encoder.encode(value));
+}
+
+export async function sha256Bytes(bytes: BufferSource): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
   return bytesToHex(new Uint8Array(digest));
 }
 

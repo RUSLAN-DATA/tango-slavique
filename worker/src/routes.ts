@@ -17,9 +17,21 @@ import {
   publicPhotoView,
   saveUserPhoto,
   setPhotoStatus,
+  setPrimaryPhoto,
 } from "./photos/service";
+import { reviewUserPhoto } from "./photos/review";
 import { newId, nowIso } from "./crypto";
 import { sendAdminMessage } from "./telegram/notifications";
+import { notifyNewProfile } from "./telegram/profileCards";
+import { ageFromBirthDate, birthDateFromAge } from "./profile/age";
+import {
+  articleWithTranslations,
+  generateBlogLocale,
+  listBlogDrafts,
+  listPublishedBlog,
+  publishArticle,
+  publicBlogView,
+} from "./blog/service";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -62,7 +74,8 @@ function sanitizeProfile(row: Record<string, unknown>, admin: boolean) {
 export async function handleApi(
   request: Request,
   env: Env,
-  path: string
+  path: string,
+  ctx?: ExecutionContext
 ): Promise<Response | null> {
   const cors = corsHeaders(request, env);
   const method = request.method;
@@ -97,14 +110,62 @@ export async function handleApi(
         return withCors(apiError("VALIDATION_ERROR", "Invalid JSON", 400));
       }
       if (message.startsWith("VALIDATION_ERROR:")) {
+        const friendly = message.slice("VALIDATION_ERROR:".length);
         return withCors(
-          apiError("VALIDATION_ERROR", message.slice("VALIDATION_ERROR:".length), 400)
+          apiError(
+            "VALIDATION_ERROR",
+            friendly.includes("JPEG")
+              ? "Please choose a JPEG, PNG or WEBP photo under 10 MB."
+              : friendly,
+            400
+          )
         );
       }
       console.error("API error");
-      return withCors(apiError("INTERNAL_ERROR", "Request failed", 500));
+      return withCors(
+        apiError("INTERNAL_ERROR", "Something went wrong. Please try again.", 500)
+      );
     }
   };
+
+  if (path === "/api/public/blog" && method === "GET") {
+    const locale = url.searchParams.get("locale") === "es" ? "es" : "en";
+    const items = await listPublishedBlog(env, locale);
+    return withCors(apiOk({ items: items.map((row) => publicBlogView(row as Record<string, unknown>)) }));
+  }
+
+  const publicBlog = path.match(/^\/api\/public\/blog\/([a-z0-9-]+)(?:\/(cover))?$/i);
+  if (publicBlog && method === "GET") {
+    const bundle = await articleWithTranslations(env, publicBlog[1]);
+    if (!bundle || bundle.article.status !== "published") {
+      return withCors(apiError("NOT_FOUND", "Article not found", 404));
+    }
+    if (publicBlog[2] === "cover") {
+      if (!bundle.article.cover_r2_key) {
+        return withCors(apiError("NOT_FOUND", "No image", 404));
+      }
+      const object = await env.PHOTOS.get(bundle.article.cover_r2_key);
+      if (!object) {
+        return withCors(apiError("NOT_FOUND", "No image", 404));
+      }
+      return new Response(object.body, {
+        headers: {
+          "Content-Type": object.httpMetadata?.contentType || "image/jpeg",
+          "Cache-Control": "public, max-age=3600",
+          ...cors,
+        },
+      });
+    }
+    const locale = url.searchParams.get("locale") === "es" ? "es" : "en";
+    const translation =
+      bundle.translations.find((row) => row.locale === locale) || bundle.translations[0];
+    return withCors(
+      apiOk({
+        ...publicBlogView({ ...bundle.article, ...translation } as unknown as Record<string, unknown>),
+        body: translation?.body || "",
+      })
+    );
+  }
 
   if (path === "/api/auth/telegram" && method === "POST") {
     return wrap(async () => {
@@ -217,7 +278,11 @@ export async function handleApi(
       }
       await sendAdminMessage(
         env,
-        `Заявка ${updated.id}: ${updated.status.toUpperCase()}`
+        status === "approved"
+          ? "Application approved."
+          : status === "rejected"
+            ? "Application rejected."
+            : "Asked for a little more information."
       ).catch(() => undefined);
       return apiOk(updated);
     });
@@ -245,8 +310,13 @@ export async function handleApi(
         "SELECT * FROM profiles WHERE user_id = ?"
       )
         .bind(user.id)
-        .first();
-      return apiOk(profile || {});
+        .first<Record<string, unknown>>();
+      return apiOk({
+        ...(profile || {}),
+        age: ageFromBirthDate(
+          typeof profile?.birth_date === "string" ? profile.birth_date : null
+        ),
+      });
     });
   }
 
@@ -282,6 +352,10 @@ export async function handleApi(
         sets.push("height = ?");
         values.push(Math.trunc(body.height));
       }
+      if (typeof body.age === "number") {
+        sets.push("birth_date = ?");
+        values.push(birthDateFromAge(body.age));
+      }
       if (!sets.length) {
         return apiError("VALIDATION_ERROR", "No profile fields to update", 400);
       }
@@ -298,6 +372,46 @@ export async function handleApi(
         .bind(user.id)
         .first();
       return apiOk(profile || {});
+    });
+  }
+
+  if (path === "/api/profile/submit" && method === "POST") {
+    return wrap(async () => {
+      const user = await requireUser(env, request);
+      const profile = await env.DB.prepare(
+        "SELECT * FROM profiles WHERE user_id = ?"
+      )
+        .bind(user.id)
+        .first<{
+          first_name: string | null;
+          city: string | null;
+          about: string | null;
+          birth_date: string | null;
+        }>();
+      if (!profile?.first_name) {
+        return apiError("VALIDATION_ERROR", "Please add your name.", 400);
+      }
+      const photos = await listPhotos(env, user.id);
+      if (!photos.length) {
+        return apiError("VALIDATION_ERROR", "Please add at least one photo.", 400);
+      }
+      await env.DB.prepare(
+        "UPDATE profiles SET status = 'pending', updated_at = ? WHERE user_id = ?"
+      )
+        .bind(nowIso(), user.id)
+        .run();
+      await createApplication(env, {
+        name: profile.first_name,
+        email: "",
+        phone: "",
+        city: profile.city || "",
+        message: profile.about || "",
+        source: "miniapp",
+        userId: user.id,
+        silent: true,
+      });
+      await notifyNewProfile(env, user.id).catch(() => false);
+      return apiOk({ submitted: true });
     });
   }
 
@@ -393,9 +507,17 @@ export async function handleApi(
       const form = await request.formData();
       const file = form.get("file");
       if (!(file instanceof File)) {
-        return apiError("VALIDATION_ERROR", "file is required", 400);
+        return apiError("VALIDATION_ERROR", "Please add at least one photo.", 400);
       }
       const photo = await saveUserPhoto(env, user.id, file);
+      ctx?.waitUntil(
+        (async () => {
+          const object = await env.PHOTOS.get(photo.r2_key);
+          if (object) {
+            await reviewUserPhoto(env, photo, await object.arrayBuffer());
+          }
+        })().catch(() => undefined)
+      );
       return apiOk(publicPhotoView(photo));
     });
   }
@@ -417,7 +539,7 @@ export async function handleApi(
     });
   }
 
-  const photoId = path.match(/^\/api\/photos\/([a-f0-9]+)(?:\/(approve|reject))?$/);
+  const photoId = path.match(/^\/api\/photos\/([a-f0-9]+)(?:\/(approve|reject|primary))?$/);
   if (photoId && method === "GET" && !photoId[2]) {
     return wrap(async () => {
       const user = await requireUser(env, request);
@@ -461,7 +583,22 @@ export async function handleApi(
     });
   }
 
-  if (photoId && photoId[2] && method === "POST") {
+  if (photoId && photoId[2] === "primary" && method === "POST") {
+    return wrap(async () => {
+      const user = await requireUser(env, request);
+      const photo = await getPhoto(env, photoId[1]);
+      if (!photo) {
+        return apiError("NOT_FOUND", "Photo not found", 404);
+      }
+      if (photo.user_id !== user.id && !isAdminUser(env, user)) {
+        return apiError("FORBIDDEN", "Admin access required", 403);
+      }
+      await setPrimaryPhoto(env, photo.user_id, photo.id);
+      return apiOk({ id: photo.id, is_primary: true });
+    });
+  }
+
+  if (photoId && photoId[2] && photoId[2] !== "primary" && method === "POST") {
     return wrap(async () => {
       await requireAdmin(env, request);
       const status = photoId[2] === "approve" ? "approved" : "rejected";
@@ -476,18 +613,36 @@ export async function handleApi(
   if (path === "/api/matches" && method === "GET") {
     return wrap(async () => {
       const user = await requireUser(env, request);
-      if (isAdminUser(env, user)) {
-        const rows = await env.DB.prepare(
-          "SELECT * FROM matches ORDER BY created_at DESC LIMIT 100"
-        ).all();
-        return apiOk({ items: rows.results || [] });
-      }
       const rows = await env.DB.prepare(
-        "SELECT * FROM matches WHERE user_id = ? OR matched_user_id = ? ORDER BY created_at DESC LIMIT 50"
+        `SELECT m.id, m.status, m.user_id, m.matched_user_id, m.created_at,
+                p.first_name, p.city, p.about, p.birth_date
+         FROM matches m
+         JOIN profiles p ON p.user_id = CASE WHEN m.user_id = ? THEN m.matched_user_id ELSE m.user_id END
+         WHERE m.user_id = ? OR m.matched_user_id = ?
+         ORDER BY m.created_at DESC LIMIT 50`
       )
-        .bind(user.id, user.id)
+        .bind(user.id, user.id, user.id)
         .all();
-      return apiOk({ items: rows.results || [] });
+      return apiOk({
+        items: (rows.results || []).map((row) => {
+          const item = row as {
+            id: string;
+            status: string;
+            first_name?: string;
+            city?: string;
+            about?: string;
+            birth_date?: string;
+          };
+          return {
+            id: item.id,
+            status: item.status,
+            first_name: item.first_name || "",
+            city: item.city || "",
+            about: item.about || "",
+            age: ageFromBirthDate(item.birth_date || null),
+          };
+        }),
+      });
     });
   }
 
@@ -657,6 +812,29 @@ export async function handleApi(
         .bind(note, nowIso(), notePatch[1])
         .run();
       return apiOk({ id: notePatch[1], note });
+    });
+  }
+
+  if (path === "/api/admin/blog" && method === "GET") {
+    return wrap(async () => {
+      await requireAdmin(env, request);
+      return apiOk({ items: await listBlogDrafts(env) });
+    });
+  }
+
+  const adminBlog = path.match(/^\/api\/admin\/blog\/([a-f0-9]+)\/(publish|en|es)$/);
+  if (adminBlog && method === "POST") {
+    return wrap(async () => {
+      await requireAdmin(env, request);
+      if (adminBlog[2] === "publish") {
+        const article = await publishArticle(env, adminBlog[1]);
+        if (!article) {
+          return apiError("NOT_FOUND", "Article not found", 404);
+        }
+        return apiOk(article);
+      }
+      const ok = await generateBlogLocale(env, adminBlog[1], adminBlog[2] as "en" | "es");
+      return apiOk({ translated: ok });
     });
   }
 

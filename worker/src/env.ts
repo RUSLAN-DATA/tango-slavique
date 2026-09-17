@@ -5,6 +5,7 @@ export interface Env {
   TELEGRAM_ADMIN_IDS: string;
   TELEGRAM_ADMIN_CHAT_ID: string;
   TELEGRAM_WEBHOOK_SECRET: string;
+  GEMINI_API_KEY?: string;
   MINIAPP_URL?: string;
   APP_ORIGIN?: string;
 }

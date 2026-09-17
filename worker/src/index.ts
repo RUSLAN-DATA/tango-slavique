@@ -82,7 +82,7 @@ export default {
       }
     }
 
-    const apiResponse = await handleApi(request, env, path);
+    const apiResponse = await handleApi(request, env, path, ctx);
     if (apiResponse) {
       return apiResponse;
     }

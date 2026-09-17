@@ -3,6 +3,7 @@ import {
   sendTelegramDocument,
   sendTelegramMessage,
   sendTelegramPhoto,
+  sendTelegramPhotoFile,
 } from "./api";
 
 function adminChatId(env: Env): string | null {
@@ -49,4 +50,20 @@ export async function sendAdminDocument(
   return true;
 }
 
-export { sendTelegramMessage };
+export async function sendAdminPhotoFile(
+  env: Env,
+  bytes: ArrayBuffer,
+  filename: string,
+  mimeType: string,
+  caption?: string,
+  extra: Record<string, unknown> = {}
+): Promise<boolean> {
+  const chatId = adminChatId(env);
+  if (!chatId) {
+    return false;
+  }
+  await sendTelegramPhotoFile(env, chatId, bytes, filename, mimeType, caption, extra);
+  return true;
+}
+
+export { sendTelegramMessage, sendTelegramPhotoFile };

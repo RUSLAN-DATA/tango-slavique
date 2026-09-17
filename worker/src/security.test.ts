@@ -190,3 +190,88 @@ describe("telegram webhook", () => {
     expect(response.status).toBe(200);
   });
 });
+
+describe("locale detection", () => {
+  it("detects spanish and english", async () => {
+    const { detectLocale, otherLocale } = await import("./blog/language");
+    expect(detectLocale("Hoy queremos compartir una historia de amor")).toBe("es");
+    expect(detectLocale("Today we want to share a story about love")).toBe("en");
+    expect(otherLocale("en")).toBe("es");
+  });
+});
+
+describe("admin caption intent", () => {
+  it("classifies blog, attach and new profile", async () => {
+    const { parseAdminCaption } = await import("./telegram/intent");
+    expect(
+      parseAdminCaption(
+        "Today we want to share a long enough journal paragraph about the house and discretion.",
+        true
+      ).type
+    ).toBe("blog");
+    expect(parseAdminCaption("Maria profile photo", true)).toEqual({
+      type: "attach",
+      name: "Maria",
+    });
+    expect(parseAdminCaption("New profile Elena", true)).toEqual({
+      type: "new_profile",
+      name: "Elena",
+    });
+  });
+});
+
+describe("age helpers", () => {
+  it("converts age to a birth year", async () => {
+    const { birthDateFromAge, ageFromBirthDate } = await import("./profile/age");
+    expect(birthDateFromAge(27).startsWith(String(new Date().getFullYear() - 27))).toBe(
+      true
+    );
+    expect(ageFromBirthDate(`${new Date().getFullYear() - 30}-01-01`)).toBe(30);
+  });
+});
+
+describe("public photo view", () => {
+  it("hides storage keys and technical statuses", async () => {
+    const { publicPhotoView } = await import("./photos/service");
+    const view = publicPhotoView({
+      id: "abc",
+      user_id: "user1",
+      r2_key: "users/user1/abc.jpg",
+      original_name: "secret.jpg",
+      mime_type: "image/jpeg",
+      size: 1200,
+      sort_order: 0,
+      status: "pending",
+      created_at: "2026-01-01T00:00:00.000Z",
+      is_primary: 1,
+    });
+    expect(view).not.toHaveProperty("r2_key");
+    expect(view).not.toHaveProperty("original_name");
+    expect(view.status).toBe("saved");
+    expect(view.is_primary).toBe(true);
+  });
+});
+
+describe("annotation overlay", () => {
+  it("builds a png with a review box", async () => {
+    const { buildAnnotationPng } = await import("./photos/annotate");
+    const png = await buildAnnotationPng([{ x: 10, y: 10, w: 40, h: 50, label: "person" }]);
+    expect(png[0]).toBe(137);
+    expect(png[1]).toBe(80);
+    expect(png[2]).toBe(78);
+    expect(png[3]).toBe(71);
+    expect(png.length).toBeGreaterThan(80);
+  });
+});
+
+describe("gemini fallback", () => {
+  it("returns null without an api key", async () => {
+    const { geminiGenerateJson, textPart } = await import("./ai/gemini");
+    const result = await geminiGenerateJson(
+      { GEMINI_API_KEY: "" } as Env,
+      [textPart("hi")],
+      "system"
+    );
+    expect(result).toBeNull();
+  });
+});

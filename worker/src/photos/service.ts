@@ -12,6 +12,7 @@ export type PhotoRow = {
   sort_order: number;
   status: string;
   created_at: string;
+  is_primary?: number;
 };
 
 export async function saveUserPhoto(
@@ -63,6 +64,13 @@ export async function saveUserPhoto(
     )
     .run();
 
+  if (!sort?.count) {
+    await env.DB.prepare("UPDATE photos SET is_primary = 1 WHERE id = ?")
+      .bind(id)
+      .run()
+      .catch(() => undefined);
+  }
+
   return (await env.DB.prepare("SELECT * FROM photos WHERE id = ?")
     .bind(id)
     .first<PhotoRow>())!;
@@ -93,6 +101,18 @@ export async function deletePhoto(
   env: Env,
   photo: PhotoRow
 ): Promise<void> {
+  const review = await env.DB.prepare(
+    "SELECT annotation_key FROM photo_reviews WHERE photo_id = ?"
+  )
+    .bind(photo.id)
+    .first<{ annotation_key: string | null }>();
+  if (review?.annotation_key) {
+    await env.PHOTOS.delete(review.annotation_key).catch(() => undefined);
+  }
+  await env.DB.prepare("DELETE FROM photo_reviews WHERE photo_id = ?")
+    .bind(photo.id)
+    .run()
+    .catch(() => undefined);
   await env.PHOTOS.delete(photo.r2_key);
   await env.DB.prepare("DELETE FROM photos WHERE id = ?").bind(photo.id).run();
 }
@@ -108,14 +128,26 @@ export async function setPhotoStatus(
   return getPhoto(env, id);
 }
 
+export async function setPrimaryPhoto(env: Env, userId: string, photoId: string) {
+  await env.DB.prepare("UPDATE photos SET is_primary = 0 WHERE user_id = ?")
+    .bind(userId)
+    .run();
+  await env.DB.prepare(
+    "UPDATE photos SET is_primary = 1, sort_order = 0 WHERE id = ? AND user_id = ?"
+  )
+    .bind(photoId, userId)
+    .run();
+}
+
 export function publicPhotoView(photo: PhotoRow) {
   return {
     id: photo.id,
     user_id: photo.user_id,
-    status: photo.status,
+    status: photo.status === "rejected" ? "needs_new" : photo.status === "approved" ? "ready" : "saved",
     mime_type: photo.mime_type,
     size: photo.size,
     sort_order: photo.sort_order,
+    is_primary: Boolean(photo.is_primary) || photo.sort_order === 0,
     created_at: photo.created_at,
   };
 }

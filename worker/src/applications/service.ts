@@ -29,12 +29,12 @@ function applicationKeyboard(id: string) {
   return {
     inline_keyboard: [
       [
-        { text: "Открыть", callback_data: `o:${id}` },
-        { text: "Одобрить", callback_data: `y:${id}` },
+        { text: "👀 View", callback_data: `o:${id}` },
+        { text: "✅ Approve", callback_data: `y:${id}` },
       ],
       [
-        { text: "Отклонить", callback_data: `n:${id}` },
-        { text: "Нужна информация", callback_data: `i:${id}` },
+        { text: "❌ Reject", callback_data: `n:${id}` },
+        { text: "💬 Need info", callback_data: `i:${id}` },
       ],
     ],
   };
@@ -42,13 +42,13 @@ function applicationKeyboard(id: string) {
 
 function applicationNotice(row: ApplicationRow): string {
   return [
-    "🆕 Новая заявка Tango Slavique",
-    `Имя: ${row.name || "—"}`,
-    `Город: ${row.city || "—"}`,
-    `Email: ${row.email || "—"}`,
-    `Телефон: ${row.phone || "—"}`,
-    `Status: ${row.status.toUpperCase()}`,
-  ].join("\n");
+    "🆕 NEW PROFILE",
+    `👩 ${row.name || "Application"}`,
+    `📍 ${row.city || "—"}`,
+    row.message ? `📝 ${row.message.slice(0, 240)}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export async function createApplication(
@@ -61,6 +61,7 @@ export async function createApplication(
     message: string;
     source: string;
     userId?: string | null;
+    silent?: boolean;
   }
 ): Promise<{ application: ApplicationRow; notified: boolean }> {
   const now = nowIso();
@@ -91,6 +92,9 @@ export async function createApplication(
     .first<ApplicationRow>())!;
 
   let notified = false;
+  if (input.silent) {
+    return { application, notified };
+  }
   try {
     notified = await sendAdminMessage(env, applicationNotice(application), {
       reply_markup: applicationKeyboard(id),
