@@ -2,6 +2,7 @@ import type { Env } from "../env";
 import { geminiGenerateJson, imagePart, textPart } from "../ai/gemini";
 import { newId, nowIso, sha256Bytes } from "../crypto";
 import { sendAdminPhotoFile, sendAdminMessage } from "../telegram/notifications";
+import { miniAppStartLink } from "../telegram/miniAppLinks";
 import { buildAnnotationPng } from "./annotate";
 import { getPhoto, type PhotoRow } from "./service";
 
@@ -226,7 +227,7 @@ export async function reviewUserPhoto(
   const keyboard = {
     inline_keyboard: [
       [
-        { text: "👀 View", callback_data: `f:v:${photo.id}` },
+        { text: "👁 Open", url: miniAppStartLink(env, `photo_${photo.id}`) },
         { text: "✅ Use anyway", callback_data: `f:ok:${photo.id}` },
       ],
       [

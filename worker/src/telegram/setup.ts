@@ -1,13 +1,11 @@
 import type { Env } from "../env";
 import { telegramApi } from "./api";
 import { enforceRateLimit } from "../rateLimit";
+import { miniAppHttpsUrl } from "./miniAppLinks";
+import { ensureAdminGroupCommands, ensureAdminGroupHub } from "./adminHub";
 
 const WEBHOOK_URL =
   "https://tango-slavique-api.4507208.workers.dev/api/telegram/webhook";
-
-function miniAppUrl(env: Env): string {
-  return env.MINIAPP_URL || "https://tango.bavariagloss.de/miniapp";
-}
 
 type WebhookInfo = {
   ok?: boolean;
@@ -46,13 +44,16 @@ export async function ensureTelegramRuntime(env: Env): Promise<void> {
       menu_button: {
         type: "web_app",
         text: "Open",
-        web_app: { url: miniAppUrl(env) },
+        web_app: { url: miniAppHttpsUrl(env) },
       },
     }).catch(() => undefined);
 
     await telegramApi(env, "setMyCommands", {
       commands: [{ command: "start", description: "Open Tango Slavique" }],
     }).catch(() => undefined);
+
+    await ensureAdminGroupCommands(env).catch(() => undefined);
+    await ensureAdminGroupHub(env).catch(() => undefined);
   } catch {
     console.error("Telegram runtime setup failed");
   }

@@ -7,6 +7,14 @@ import { validatePhoto, detectImageType } from "./photos/validate";
 import { calculateMatchScore } from "./matches/score";
 import { handleTelegramWebhook } from "./telegram/webhook";
 import type { Env } from "./env";
+import { isAdminUser } from "./auth/session";
+import {
+  applicationActionKeyboard,
+  adminPanelButton,
+  isAdminPanelCommand,
+  miniAppStartLink,
+  parseMiniAppStartParam,
+} from "./telegram/miniAppLinks";
 
 describe("admin IDs", () => {
   it("parses comma-separated numeric IDs", () => {
@@ -21,6 +29,44 @@ describe("admin IDs", () => {
     expect(isTelegramAdmin(ids, "1881305255")).toBe(true);
     expect(isTelegramAdmin(ids, "1")).toBe(false);
     expect(isTelegramAdmin(ids, null)).toBe(false);
+  });
+
+  it("grants the same access to every configured administrator", () => {
+    const env = {
+      TELEGRAM_ADMIN_IDS: "1881305255,1591345305",
+    } as Env;
+    const first = {
+      id: "u1",
+      telegram_user_id: "1881305255",
+      email: null,
+      phone: null,
+      role: "user" as const,
+      status: "active",
+    };
+    const second = {
+      ...first,
+      id: "u2",
+      telegram_user_id: "1591345305",
+    };
+    const outsider = {
+      ...first,
+      id: "u3",
+      telegram_user_id: "999",
+      role: "admin" as const,
+    };
+    expect(isAdminUser(env, first)).toBe(true);
+    expect(isAdminUser(env, second)).toBe(true);
+    expect(isAdminUser(env, outsider)).toBe(false);
+    expect(
+      isAdminUser(env, { ...outsider, telegram_user_id: null, role: "admin" })
+    ).toBe(false);
+  });
+
+  it("does not treat usernames as admin identifiers", () => {
+    const ids = parseTelegramAdminIds("admin, @owner, 1881305255");
+    expect(ids.has("1881305255")).toBe(true);
+    expect(ids.has("admin")).toBe(false);
+    expect(ids.has("@owner")).toBe(false);
   });
 });
 
@@ -138,6 +184,46 @@ describe("telegram initData", () => {
 
     const result = await validateTelegramInitData(botToken, params.toString());
     expect(result.user.id).toBe(1881305255);
+    expect(result.startParam).toBe("");
+  });
+
+  it("extracts start_param without trusting it for admin rights", async () => {
+    const botToken = "123456:TESTTOKEN";
+    const user = JSON.stringify({ id: 42, first_name: "Member" });
+    const authDate = String(Math.floor(Date.now() / 1000));
+    const params = new URLSearchParams({
+      auth_date: authDate,
+      query_id: "AAE",
+      start_param: "admin",
+      chat_type: "supergroup",
+      user,
+    });
+    const dataCheckString = [...params.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, value]) => `${key}=${value}`)
+      .join("\n");
+    const secretKey = await hmacSha256(
+      new TextEncoder().encode("WebAppData"),
+      botToken
+    );
+    const hash = await hmacSha256Hex(secretKey, dataCheckString);
+    params.set("hash", hash);
+
+    const result = await validateTelegramInitData(botToken, params.toString());
+    expect(result.user.id).toBe(42);
+    expect(result.startParam).toBe("admin");
+    expect(result.chatType).toBe("supergroup");
+    const env = { TELEGRAM_ADMIN_IDS: "1881305255,1591345305" } as Env;
+    expect(
+      isAdminUser(env, {
+        id: "u",
+        telegram_user_id: String(result.user.id),
+        email: null,
+        phone: null,
+        role: "user",
+        status: "active",
+      })
+    ).toBe(false);
   });
 
   it("rejects a tampered payload", async () => {
@@ -188,6 +274,90 @@ describe("telegram webhook", () => {
       env
     );
     expect(response.status).toBe(200);
+  });
+
+  it("ignores ordinary group chatter from non-admins", async () => {
+    const groupEnv = {
+      TELEGRAM_WEBHOOK_SECRET: "expected-secret",
+      TELEGRAM_ADMIN_IDS: "1881305255,1591345305",
+      TELEGRAM_ADMIN_CHAT_ID: "-100123",
+    } as Env;
+    const response = await handleTelegramWebhook(
+      new Request("https://example.com/api/telegram/webhook", {
+        method: "POST",
+        headers: { "X-Telegram-Bot-Api-Secret-Token": "expected-secret" },
+        body: JSON.stringify({
+          update_id: 2,
+          message: {
+            message_id: 10,
+            text: "hello everyone",
+            from: { id: 999 },
+            chat: { id: -100123, type: "supergroup" },
+          },
+        }),
+      }),
+      groupEnv
+    );
+    expect(response.status).toBe(200);
+  });
+
+  it("does not reply when a non-admin uses /admin in the group", async () => {
+    const groupEnv = {
+      TELEGRAM_WEBHOOK_SECRET: "expected-secret",
+      TELEGRAM_ADMIN_IDS: "1881305255,1591345305",
+      TELEGRAM_ADMIN_CHAT_ID: "-100123",
+    } as Env;
+    const response = await handleTelegramWebhook(
+      new Request("https://example.com/api/telegram/webhook", {
+        method: "POST",
+        headers: { "X-Telegram-Bot-Api-Secret-Token": "expected-secret" },
+        body: JSON.stringify({
+          update_id: 3,
+          message: {
+            message_id: 11,
+            text: "/admin",
+            from: { id: 999 },
+            chat: { id: -100123, type: "supergroup" },
+          },
+        }),
+      }),
+      groupEnv
+    );
+    expect(response.status).toBe(200);
+  });
+});
+
+describe("admin panel links", () => {
+  const env = {
+    TELEGRAM_BOT_USERNAME: "Tangoslavique_bot",
+    MINIAPP_URL: "https://tango.bavariagloss.de/miniapp",
+  } as Env;
+
+  it("builds a Telegram Mini App link for every administrator", () => {
+    expect(miniAppStartLink(env, "admin")).toBe(
+      "https://t.me/Tangoslavique_bot?startapp=admin"
+    );
+    expect(isAdminPanelCommand("/admin")).toBe(true);
+    expect(isAdminPanelCommand("/panel@Tangoslavique_bot")).toBe(true);
+    expect(isAdminPanelCommand("hello")).toBe(false);
+  });
+
+  it("uses a URL Open button so all admins can open the Mini App from the group", () => {
+    const keyboard = applicationActionKeyboard(env, "abc123def4567890");
+    const open = keyboard.inline_keyboard[0][0] as { text: string; url?: string };
+    expect(open.text).toBe("👁 Open");
+    expect(open.url).toContain("startapp=app_abc123def4567890");
+    const urlButton = adminPanelButton(env, "url") as { url: string };
+    const webButton = adminPanelButton(env, "web_app") as { web_app: { url: string } };
+    expect(urlButton.url).toContain("startapp=admin");
+    expect(webButton.web_app.url).toContain("startapp=admin");
+  });
+
+  it("parses Mini App start params", () => {
+    expect(parseMiniAppStartParam("photo_aa11")).toEqual({
+      section: "photos",
+      id: "aa11",
+    });
   });
 });
 

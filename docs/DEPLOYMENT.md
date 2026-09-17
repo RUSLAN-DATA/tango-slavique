@@ -79,6 +79,7 @@ Worker vars in `wrangler.toml`:
 
 - `MINIAPP_URL=https://tango.bavariagloss.de/miniapp`
 - `APP_ORIGIN=https://tango.bavariagloss.de`
+- `TELEGRAM_BOT_USERNAME=Tangoslavique_bot`
 
 ### Vercel / Next.js
 

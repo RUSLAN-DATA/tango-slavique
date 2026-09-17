@@ -4,6 +4,7 @@ import { ageFromBirthDate } from "../profile/age";
 import { listPhotos } from "../photos/service";
 import { sendTelegramMessage, sendTelegramPhotoFile } from "./api";
 import { sendAdminMessage } from "./notifications";
+import { miniAppStartLink } from "./miniAppLinks";
 
 export async function sendProfileCard(
   env: Env,
@@ -41,6 +42,7 @@ export async function sendProfileCard(
   await sendTelegramMessage(env, chatId, text, {
     reply_markup: {
       inline_keyboard: [
+        [{ text: "👁 Open", url: miniAppStartLink(env, `prof_${uid}`) }],
         [
           { text: "✅ Approve", callback_data: `p:y:${uid}` },
           { text: "❌ Reject", callback_data: `p:n:${uid}` },
@@ -104,12 +106,12 @@ export async function notifyNewProfile(
     reply_markup: {
       inline_keyboard: [
         [
-          { text: "👀 View", callback_data: `p:v:${userId}` },
+          { text: "👁 Open", url: miniAppStartLink(env, `prof_${userId}`) },
           { text: "✅ Approve", callback_data: `p:y:${userId}` },
         ],
         [
           { text: "❌ Reject", callback_data: `p:n:${userId}` },
-          { text: "💬 Need info", callback_data: `p:i:${userId}` },
+          { text: "ℹ️ Need info", callback_data: `p:i:${userId}` },
         ],
       ],
     },

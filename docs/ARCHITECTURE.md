@@ -24,7 +24,7 @@ Do not put secrets in this repository, `wrangler.toml`, or `NEXT_PUBLIC_*` varia
 
 ## Auth model
 
-Mini App auth is Telegram `initData` validated on the Worker with HMAC (`POST /api/auth/telegram`). The Worker creates a session and stores only a SHA-256 hash of the token. Admin rights are checked server-side against `TELEGRAM_ADMIN_IDS`, never from a client-supplied role.
+Mini App auth is Telegram `initData` validated on the Worker with HMAC (`POST /api/auth/telegram`). The Worker creates a session and stores only a SHA-256 hash of the token. Admin rights are checked server-side against `TELEGRAM_ADMIN_IDS`, never from a client-supplied role. Every ID in `TELEGRAM_ADMIN_IDS` has the same admin permissions. The admin Telegram group is the convenient entry point to the Admin Mini App; group membership alone does not grant access.
 
 ## Photo storage
 

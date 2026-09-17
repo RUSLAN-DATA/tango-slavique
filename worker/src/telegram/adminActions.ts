@@ -11,7 +11,6 @@ import { listPhotos } from "../photos/service";
 import { overridePhotoReview } from "../photos/review";
 import {
   generateBlogLocale,
-  getArticle,
   listBlogDrafts,
   publishArticle,
   articleWithTranslations,
@@ -20,21 +19,7 @@ import { isTelegramAdmin, parseTelegramAdminIds } from "./adminIds";
 import { answerTelegramCallbackQuery, sendTelegramMessage, sendTelegramPhotoFile } from "./api";
 import { attachLatestInbox } from "./adminInbox";
 import { sendProfileCard, setProfileVisibility } from "./profileCards";
-
-function applicationKeyboard(id: string) {
-  return {
-    inline_keyboard: [
-      [
-        { text: "👀 View", callback_data: `o:${id}` },
-        { text: "✅ Approve", callback_data: `y:${id}` },
-      ],
-      [
-        { text: "❌ Reject", callback_data: `n:${id}` },
-        { text: "💬 Need info", callback_data: `i:${id}` },
-      ],
-    ],
-  };
-}
+import { applicationActionKeyboard, adminPanelButton, miniAppStartLink } from "./miniAppLinks";
 
 async function approveUser(env: Env, userId: string, adminId: string) {
   await setProfileVisibility(env, userId, "public");
@@ -100,7 +85,7 @@ export async function handleAdminCallback(
         ]
           .filter(Boolean)
           .join("\n"),
-        { reply_markup: applicationKeyboard(application.id) }
+        { reply_markup: applicationActionKeyboard(env, application.id) }
       );
       return;
     }
@@ -133,7 +118,7 @@ export async function handleAdminCallback(
         env,
         chatId,
         `👩 ${item.name || "Application"}\n📍 ${item.city || "—"}`,
-        { reply_markup: applicationKeyboard(item.id) }
+        { reply_markup: applicationActionKeyboard(env, item.id) }
       );
     }
     return;
@@ -156,7 +141,12 @@ export async function handleAdminCallback(
         `${item.first_name || "Profile"}${item.city ? ` · ${item.city}` : ""}`,
         {
           reply_markup: {
-            inline_keyboard: [[{ text: "👀 View", callback_data: `p:v:${item.user_id}` }]],
+            inline_keyboard: [
+              [
+                { text: "👁 Open", url: miniAppStartLink(env, `prof_${item.user_id}`) },
+                { text: "👀 View", callback_data: `p:v:${item.user_id}` },
+              ],
+            ],
           },
         }
       );
@@ -358,6 +348,7 @@ export async function sendAdminHome(
     {
       reply_markup: {
         inline_keyboard: [
+          [adminPanelButton(env, "web_app")],
           [
             { text: "👤 Applications", callback_data: "m:apps" },
             { text: "👩 Profiles", callback_data: "m:prof" },

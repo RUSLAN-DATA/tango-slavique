@@ -2,6 +2,7 @@ import type { Env } from "./env";
 import { corsHeaders, apiError, apiOk } from "./http";
 import { isAdminUser, requireAdmin, requireUser, createSession, upsertTelegramUser } from "./auth/session";
 import { validateTelegramInitData } from "./auth/telegramInitData";
+import { isTelegramAdmin, parseTelegramAdminIds } from "./telegram/adminIds";
 import {
   createApplication,
   getApplication,
@@ -189,9 +190,11 @@ export async function handleApi(
         token,
         user: {
           id: user.id,
-          role: user.role,
+          role: isAdminUser(env, user) ? "admin" : "user",
           status: user.status,
         },
+        startParam: parsed.startParam,
+        chatType: parsed.chatType,
       });
     });
   }
@@ -672,20 +675,64 @@ export async function handleApi(
     return wrap(async () => {
       await requireAdmin(env, request);
       const rows = await env.DB.prepare(
-        "SELECT * FROM photos ORDER BY created_at DESC LIMIT 100"
+        `SELECT p.id, p.user_id, p.r2_key, p.original_name, p.mime_type, p.size, p.sort_order,
+                p.status, p.created_at, p.is_primary,
+                r.review_status, r.confidence, r.issues, r.main_person_detected, r.face_visible,
+                r.quality, r.recommended_primary, r.admin_override, r.annotation_key
+         FROM photos p
+         LEFT JOIN photo_reviews r ON r.photo_id = p.id
+         ORDER BY p.created_at DESC LIMIT 100`
       ).all();
-      const items = (rows.results || []) as Array<{
-        id: string;
-        user_id: string;
-        r2_key: string;
-        original_name: string | null;
-        mime_type: string;
-        size: number;
-        sort_order: number;
-        status: string;
-        created_at: string;
-      }>;
-      return apiOk({ items: items.map(publicPhotoView) });
+      const items = (rows.results || []).map((row) => {
+        const photo = row as {
+          id: string;
+          user_id: string;
+          r2_key: string;
+          original_name: string | null;
+          mime_type: string;
+          size: number;
+          sort_order: number;
+          status: string;
+          created_at: string;
+          is_primary?: number;
+          review_status: string | null;
+          confidence: number | null;
+          issues: string | null;
+          main_person_detected: number | null;
+          face_visible: number | null;
+          quality: string | null;
+          recommended_primary: number | null;
+          admin_override: string | null;
+          annotation_key: string | null;
+        };
+        let issues: unknown[] = [];
+        if (photo.issues) {
+          try {
+            const parsed = JSON.parse(photo.issues);
+            issues = Array.isArray(parsed) ? parsed : [];
+          } catch {
+            issues = [];
+          }
+        }
+        return {
+          ...publicPhotoView(photo),
+          photo_status: photo.status,
+          review: photo.review_status
+            ? {
+                status: photo.review_status,
+                confidence: photo.confidence,
+                issues,
+                main_person_detected: Boolean(photo.main_person_detected),
+                face_visible: Boolean(photo.face_visible),
+                quality: photo.quality,
+                recommended_primary: Boolean(photo.recommended_primary),
+                admin_override: photo.admin_override,
+                has_annotation: Boolean(photo.annotation_key),
+              }
+            : null,
+        };
+      });
+      return apiOk({ items });
     });
   }
 
@@ -776,6 +823,74 @@ export async function handleApi(
     });
   }
 
+  if (adminProfile && method === "PATCH") {
+    return wrap(async () => {
+      const admin = await requireAdmin(env, request);
+      const body = await readJson(request);
+      const profile = await env.DB.prepare(
+        "SELECT user_id FROM profiles WHERE user_id = ? OR id = ?"
+      )
+        .bind(adminProfile[1], adminProfile[1])
+        .first<{ user_id: string }>();
+      if (!profile) {
+        return apiError("NOT_FOUND", "Profile not found", 404);
+      }
+      const fields = [
+        "first_name",
+        "last_name",
+        "birth_date",
+        "gender",
+        "city",
+        "country",
+        "about",
+        "occupation",
+        "education",
+        "languages",
+        "children",
+        "marital_status",
+        "hobbies",
+        "status",
+      ] as const;
+      const values: Array<string | number | null> = [];
+      const sets: string[] = [];
+      for (const field of fields) {
+        if (field in body) {
+          sets.push(`${field} = ?`);
+          const value = body[field];
+          values.push(typeof value === "string" ? value.slice(0, 500) : null);
+        }
+      }
+      if (typeof body.height === "number") {
+        sets.push("height = ?");
+        values.push(Math.trunc(body.height));
+      }
+      if (typeof body.age === "number") {
+        sets.push("birth_date = ?");
+        values.push(birthDateFromAge(body.age));
+      }
+      if (!sets.length) {
+        return apiError("VALIDATION_ERROR", "No profile fields to update", 400);
+      }
+      sets.push("updated_at = ?");
+      values.push(nowIso(), profile.user_id);
+      await env.DB.prepare(
+        `UPDATE profiles SET ${sets.join(", ")} WHERE user_id = ?`
+      )
+        .bind(...values)
+        .run();
+      await env.DB.prepare(
+        `INSERT INTO admin_actions (id, admin_telegram_id, action, entity_type, entity_id, created_at)
+         VALUES (?, ?, 'edit', 'profile', ?, ?)`
+      )
+        .bind(newId(), admin.telegram_user_id || admin.id, profile.user_id, nowIso())
+        .run();
+      const updated = await env.DB.prepare("SELECT * FROM profiles WHERE user_id = ?")
+        .bind(profile.user_id)
+        .first();
+      return apiOk(sanitizeProfile((updated || {}) as Record<string, unknown>, true));
+    });
+  }
+
   if (path === "/api/admin/notes" && method === "POST") {
     return wrap(async () => {
       const admin = await requireAdmin(env, request);
@@ -835,6 +950,224 @@ export async function handleApi(
       }
       const ok = await generateBlogLocale(env, adminBlog[1], adminBlog[2] as "en" | "es");
       return apiOk({ translated: ok });
+    });
+  }
+
+  if (path === "/api/admin/dashboard" && method === "GET") {
+    return wrap(async () => {
+      await requireAdmin(env, request);
+      const count = async (sql: string) => {
+        const row = await env.DB.prepare(sql).first<{ n: number }>();
+        return Number(row?.n || 0);
+      };
+      const [
+        applications,
+        pendingApplications,
+        profiles,
+        pendingPhotos,
+        matches,
+        introductions,
+        feedback,
+        users,
+      ] = await Promise.all([
+        count("SELECT COUNT(*) as n FROM applications"),
+        count("SELECT COUNT(*) as n FROM applications WHERE status IN ('new','info_requested')"),
+        count("SELECT COUNT(*) as n FROM profiles"),
+        count("SELECT COUNT(*) as n FROM photos WHERE status = 'pending'"),
+        count("SELECT COUNT(*) as n FROM matches"),
+        count("SELECT COUNT(*) as n FROM introductions"),
+        count("SELECT COUNT(*) as n FROM feedback"),
+        count("SELECT COUNT(*) as n FROM users"),
+      ]);
+      return apiOk({
+        applications,
+        pendingApplications,
+        profiles,
+        pendingPhotos,
+        matches,
+        introductions,
+        feedback,
+        users,
+      });
+    });
+  }
+
+  const adminPhotoAnnotation = path.match(/^\/api\/admin\/photos\/([a-f0-9]+)\/annotation$/);
+  if (adminPhotoAnnotation && method === "GET") {
+    return wrap(async () => {
+      await requireAdmin(env, request);
+      const review = await env.DB.prepare(
+        "SELECT annotation_key FROM photo_reviews WHERE photo_id = ?"
+      )
+        .bind(adminPhotoAnnotation[1])
+        .first<{ annotation_key: string | null }>();
+      if (!review?.annotation_key) {
+        return apiError("NOT_FOUND", "No annotation", 404);
+      }
+      const object = await env.PHOTOS.get(review.annotation_key);
+      if (!object) {
+        return apiError("NOT_FOUND", "No annotation", 404);
+      }
+      return new Response(object.body, {
+        headers: {
+          "Content-Type": object.httpMetadata?.contentType || "image/png",
+          "Cache-Control": "private, max-age=60",
+          ...cors,
+        },
+      });
+    });
+  }
+
+  if (path === "/api/admin/matches" && method === "GET") {
+    return wrap(async () => {
+      await requireAdmin(env, request);
+      const rows = await env.DB.prepare(
+        `SELECT m.id, m.user_id, m.matched_user_id, m.status, m.score, m.created_at, m.updated_at,
+                a.first_name as user_name, b.first_name as matched_name
+         FROM matches m
+         LEFT JOIN profiles a ON a.user_id = m.user_id
+         LEFT JOIN profiles b ON b.user_id = m.matched_user_id
+         ORDER BY m.created_at DESC LIMIT 100`
+      ).all();
+      const responses = await env.DB.prepare(
+        "SELECT match_id, user_id, response, created_at FROM match_responses ORDER BY created_at DESC LIMIT 400"
+      ).all<{ match_id: string; user_id: string; response: string; created_at: string }>();
+      const byMatch = new Map<string, Array<Record<string, string>>>();
+      for (const row of responses.results || []) {
+        const list = byMatch.get(row.match_id) || [];
+        list.push(row);
+        byMatch.set(row.match_id, list);
+      }
+      return apiOk({
+        items: (rows.results || []).map((row) => {
+          const item = row as { id: string };
+          return { ...item, responses: byMatch.get(item.id) || [] };
+        }),
+      });
+    });
+  }
+
+  const adminMatch = path.match(/^\/api\/admin\/matches\/([a-f0-9]+)$/);
+  if (adminMatch && method === "GET") {
+    return wrap(async () => {
+      await requireAdmin(env, request);
+      const match = await env.DB.prepare(
+        `SELECT m.*, a.first_name as user_name, b.first_name as matched_name
+         FROM matches m
+         LEFT JOIN profiles a ON a.user_id = m.user_id
+         LEFT JOIN profiles b ON b.user_id = m.matched_user_id
+         WHERE m.id = ?`
+      )
+        .bind(adminMatch[1])
+        .first();
+      if (!match) {
+        return apiError("NOT_FOUND", "Match not found", 404);
+      }
+      const responses = await env.DB.prepare(
+        "SELECT id, user_id, response, created_at FROM match_responses WHERE match_id = ?"
+      )
+        .bind(adminMatch[1])
+        .all();
+      return apiOk({ match, responses: responses.results || [] });
+    });
+  }
+
+  if (path === "/api/admin/introductions" && method === "GET") {
+    return wrap(async () => {
+      await requireAdmin(env, request);
+      const rows = await env.DB.prepare(
+        `SELECT i.id, i.user_id, i.matched_user_id, i.status, i.created_at, i.updated_at,
+                a.first_name as user_name, b.first_name as matched_name
+         FROM introductions i
+         LEFT JOIN profiles a ON a.user_id = i.user_id
+         LEFT JOIN profiles b ON b.user_id = i.matched_user_id
+         ORDER BY i.created_at DESC LIMIT 100`
+      ).all();
+      return apiOk({ items: rows.results || [] });
+    });
+  }
+
+  const adminIntro = path.match(/^\/api\/admin\/introductions\/([a-f0-9]+)$/);
+  if (adminIntro && method === "PATCH") {
+    return wrap(async () => {
+      const admin = await requireAdmin(env, request);
+      const body = await readJson(request);
+      const status = typeof body.status === "string" ? body.status.slice(0, 40) : "";
+      if (!status) {
+        return apiError("VALIDATION_ERROR", "status is required", 400);
+      }
+      await env.DB.prepare(
+        "UPDATE introductions SET status = ?, updated_at = ? WHERE id = ?"
+      )
+        .bind(status, nowIso(), adminIntro[1])
+        .run();
+      await env.DB.prepare(
+        `INSERT INTO admin_actions (id, admin_telegram_id, action, entity_type, entity_id, created_at)
+         VALUES (?, ?, ?, 'introduction', ?, ?)`
+      )
+        .bind(newId(), admin.telegram_user_id || admin.id, status, adminIntro[1], nowIso())
+        .run();
+      const row = await env.DB.prepare("SELECT * FROM introductions WHERE id = ?")
+        .bind(adminIntro[1])
+        .first();
+      return apiOk(row || { id: adminIntro[1], status });
+    });
+  }
+
+  if (path === "/api/admin/feedback" && method === "GET") {
+    return wrap(async () => {
+      await requireAdmin(env, request);
+      const rows = await env.DB.prepare(
+        `SELECT f.id, f.user_id, f.target_user_id, f.rating, f.message, f.created_at,
+                a.first_name as user_name, b.first_name as target_name
+         FROM feedback f
+         LEFT JOIN profiles a ON a.user_id = f.user_id
+         LEFT JOIN profiles b ON b.user_id = f.target_user_id
+         ORDER BY f.created_at DESC LIMIT 100`
+      ).all();
+      return apiOk({ items: rows.results || [] });
+    });
+  }
+
+  if (path === "/api/admin/users" && method === "GET") {
+    return wrap(async () => {
+      await requireAdmin(env, request);
+      const rows = await env.DB.prepare(
+        `SELECT u.id, u.telegram_user_id, u.email, u.phone, u.status, u.created_at,
+                p.first_name, p.city
+         FROM users u
+         LEFT JOIN profiles p ON p.user_id = u.id
+         ORDER BY u.created_at DESC LIMIT 100`
+      ).all();
+      const adminIds = parseTelegramAdminIds(env.TELEGRAM_ADMIN_IDS);
+      return apiOk({
+        items: (rows.results || []).map((row) => {
+          const item = row as {
+            id: string;
+            telegram_user_id: string | null;
+            email: string | null;
+            phone: string | null;
+            status: string;
+            created_at: string;
+            first_name: string | null;
+            city: string | null;
+          };
+          return {
+            ...item,
+            role: isTelegramAdmin(adminIds, item.telegram_user_id) ? "admin" : "user",
+          };
+        }),
+      });
+    });
+  }
+
+  if (path === "/api/admin/actions" && method === "GET") {
+    return wrap(async () => {
+      await requireAdmin(env, request);
+      const rows = await env.DB.prepare(
+        "SELECT id, admin_telegram_id, action, entity_type, entity_id, created_at FROM admin_actions ORDER BY created_at DESC LIMIT 100"
+      ).all();
+      return apiOk({ items: rows.results || [] });
     });
   }
 

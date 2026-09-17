@@ -7,6 +7,8 @@ import { downloadTelegramFile } from "./api";
 import { handleAdminCallback, sendAdminHome } from "./adminActions";
 import { handleAdminMedia } from "./adminInbox";
 import { sendTelegramMessage } from "./api";
+import { sendAdminHub } from "./adminHub";
+import { isAdminPanelCommand, miniAppHttpsUrl } from "./miniAppLinks";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -67,8 +69,8 @@ function isPrivateChat(chatType: string | null): boolean {
   return chatType === "private";
 }
 
-function miniAppUrl(env: Env): string {
-  return env.MINIAPP_URL || "https://tango.bavariagloss.de/miniapp";
+function miniAppUrl(env: Env, startParam?: string): string {
+  return miniAppHttpsUrl(env, startParam);
 }
 
 function isAdminGroup(env: Env, chatId: number | string | null): boolean {
@@ -107,13 +109,13 @@ async function handleStart(
     env,
     chatId,
     admin
-      ? "Welcome. Open Mini App for profiles, or use the buttons below."
+      ? "Welcome. Open the Admin Panel, or use the buttons below."
       : "Welcome to Tango Slavique. Open Mini App to create your profile.",
     {
       reply_markup: {
-        inline_keyboard: [
-          [{ text: "Open Mini App", web_app: { url: miniAppUrl(env) } }],
-        ],
+        inline_keyboard: admin
+          ? [[{ text: "🛠 Admin Panel", web_app: { url: miniAppUrl(env, "admin") } }]]
+          : [[{ text: "Open Mini App", web_app: { url: miniAppUrl(env) } }]],
       },
     }
   );
@@ -147,6 +149,12 @@ async function processUpdate(env: Env, update: unknown): Promise<void> {
         await handleStart(env, chatId, admin);
         return;
       }
+      if (isAdminPanelCommand(text)) {
+        if (admin) {
+          await sendAdminHub(env, chatId, "web_app");
+        }
+        return;
+      }
       if (admin) {
         if (/^\/(applications|profiles|blog)(?:@\w+)?$/i.test(text)) {
           const map: Record<string, string> = {
@@ -172,25 +180,33 @@ async function processUpdate(env: Env, update: unknown): Promise<void> {
       }
     }
 
-    if (chatId !== null && inAdminGroup && admin && (photoId || /^\/(blog|applications|profiles)/i.test(text))) {
-      if (/^\/(applications|profiles|blog)/i.test(text) && !photoId) {
-        const key = text.replace(/^\//, "").split(/\s+/)[0].toLowerCase();
-        const map: Record<string, string> = {
-          applications: "m:apps",
-          profiles: "m:prof",
-          blog: "m:blog",
-        };
-        await handleAdminCallback(env, userId || "", "0", map[key] || "m:blog", chatId);
+    if (chatId !== null && inAdminGroup) {
+      if (isAdminPanelCommand(text) || /^\/start(?:@\w+)?(?:\s|$)/i.test(text)) {
+        if (admin) {
+          await sendAdminHub(env, chatId, "url");
+        }
         return;
       }
-      const file = photoId ? await downloadTelegramFile(env, photoId) : null;
-      await handleAdminMedia(
-        env,
-        userId || "",
-        chatId,
-        text,
-        file ? { bytes: file.bytes, mime: "image/jpeg" } : null
-      );
+      if (admin && (photoId || /^\/(blog|applications|profiles)/i.test(text))) {
+        if (/^\/(applications|profiles|blog)/i.test(text) && !photoId) {
+          const key = text.replace(/^\//, "").split(/\s+/)[0].toLowerCase();
+          const map: Record<string, string> = {
+            applications: "m:apps",
+            profiles: "m:prof",
+            blog: "m:blog",
+          };
+          await handleAdminCallback(env, userId || "", "0", map[key] || "m:blog", chatId);
+          return;
+        }
+        const file = photoId ? await downloadTelegramFile(env, photoId) : null;
+        await handleAdminMedia(
+          env,
+          userId || "",
+          chatId,
+          text,
+          file ? { bytes: file.bytes, mime: "image/jpeg" } : null
+        );
+      }
     }
   }
 

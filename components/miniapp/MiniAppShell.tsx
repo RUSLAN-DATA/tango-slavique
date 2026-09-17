@@ -9,6 +9,8 @@ import {
   WORKER_URL,
 } from "@/lib/miniapp/api";
 import { miniCopy } from "@/components/miniapp/copy";
+import { AdminPanel } from "@/components/miniapp/AdminPanel";
+import { readClientStartContext, wantsAdminMode } from "@/lib/miniapp/startParam";
 
 type MiniCopy = (typeof miniCopy)[keyof typeof miniCopy];
 type Tab = "profile" | "photos" | "matches" | "preferences" | "alerts" | "settings" | "admin";
@@ -18,7 +20,16 @@ type Photo = { id: string; status: string; is_primary?: boolean };
 declare global {
   interface Window {
     Telegram?: {
-      WebApp?: { ready: () => void; expand: () => void; initData: string };
+      WebApp?: {
+        ready: () => void;
+        expand: () => void;
+        initData: string;
+        initDataUnsafe?: {
+          start_param?: string;
+          chat_type?: string;
+          chat?: { id?: number; type?: string };
+        };
+      };
     };
   }
 }
@@ -79,9 +90,8 @@ export function MiniAppShell() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [matches, setMatches] = useState<Array<Record<string, unknown>>>([]);
   const [alerts, setAlerts] = useState<Array<Record<string, string>>>([]);
-  const [adminApps, setAdminApps] = useState<Array<Record<string, string>>>([]);
-  const [adminProfiles, setAdminProfiles] = useState<Array<Record<string, string>>>([]);
-  const [adminBlog, setAdminBlog] = useState<Array<Record<string, string>>>([]);
+  const [adminMode, setAdminMode] = useState(false);
+  const [startParam, setStartParam] = useState("");
   const [editing, setEditing] = useState(false);
   const submitted = String(profile.status || "") !== "draft" && Boolean(profile.first_name);
 
@@ -123,15 +133,19 @@ export function MiniAppShell() {
     setPhotos(photosRes.data?.items || []);
     setMatches(matchesRes.data?.items || []);
     setAlerts(notesRes.data?.items || []);
-    if (meRes.data.role === "admin") {
-      const [apps, profiles, blog] = await Promise.all([
-        workerRequest<{ items: Array<Record<string, string>> }>("/api/applications"),
-        workerRequest<{ items: Array<Record<string, string>> }>("/api/admin/profiles"),
-        workerRequest<{ items: Array<Record<string, string>> }>("/api/admin/blog"),
-      ]);
-      setAdminApps(apps.data?.items || []);
-      setAdminProfiles(profiles.data?.items || []);
-      setAdminBlog(blog.data?.items || []);
+    if (meRes.data.role !== "admin") {
+      setAdminMode(false);
+    } else {
+      const client = readClientStartContext();
+      if (
+        wantsAdminMode({
+          role: meRes.data.role,
+          startParam: startParam || client.startParam,
+          chatType: client.chatType,
+        })
+      ) {
+        setAdminMode(true);
+      }
     }
     setLoading(false);
   }
@@ -142,14 +156,34 @@ export function MiniAppShell() {
     webApp?.expand();
     const initData = webApp?.initData || "";
     async function boot() {
+      const client = readClientStartContext();
+      let nextStart = client.startParam;
+      let nextChat = client.chatType;
       if (initData) {
-        const auth = await workerRequest<{ token: string; user: Me }>("/api/auth/telegram", {
+        const auth = await workerRequest<{
+          token: string;
+          user: Me;
+          startParam?: string;
+          chatType?: string;
+        }>("/api/auth/telegram", {
           method: "POST",
           body: JSON.stringify({ initData }),
         });
-        if (auth.ok && auth.data?.token) setSessionToken(auth.data.token);
-        else setError(friendly(auth.error?.message, t.openFromTelegram));
+        if (auth.ok && auth.data?.token) {
+          setSessionToken(auth.data.token);
+          nextStart = auth.data.startParam || nextStart;
+          nextChat = auth.data.chatType || nextChat;
+          setStartParam(nextStart);
+          setAdminMode(
+            wantsAdminMode({
+              role: auth.data.user?.role,
+              startParam: nextStart,
+              chatType: nextChat,
+            })
+          );
+        } else setError(friendly(auth.error?.message, t.openFromTelegram));
       }
+      setStartParam(nextStart);
       await refresh();
     }
     void boot();
@@ -214,6 +248,19 @@ export function MiniAppShell() {
   }
 
   const wizard = tab === "profile" && (!submitted || editing);
+
+  if (adminMode && me.role === "admin") {
+    return (
+      <div className="mx-auto min-h-screen max-w-lg pb-10">
+        <header className="px-5 pb-2 pt-6">
+          {error ? <p className="text-sm text-red-300">{error}</p> : null}
+        </header>
+        <main className="px-5 py-4">
+          <AdminPanel startParam={startParam} onExit={() => { setAdminMode(false); setTab("profile"); }} />
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto min-h-screen max-w-lg pb-28">
@@ -353,47 +400,19 @@ export function MiniAppShell() {
         {tab === "settings" ? (
           <div className="space-y-4 text-ivory/70">
             <p>{String(profile.first_name || me.id.slice(0, 6))}</p>
-            <button className={ghostBtn} type="button" onClick={() => { setSessionToken(null); setMe(null); }}>{t.signOut}</button>
-          </div>
-        ) : null}
-
-        {tab === "admin" && me.role === "admin" ? (
-          <div className="space-y-6">
-            <section>
-              <h2 className="mb-3 font-display text-2xl">Applications</h2>
-              {adminApps.map((item) => (
-                <article key={item.id} className="mb-3 border border-white/10 p-3">
-                  <p>{item.name || item.id}</p>
-                  <div className="mt-2 flex gap-2">
-                    <button className="min-h-10 border border-gold px-3 text-xs uppercase text-gold" type="button" onClick={async () => { await workerRequest(`/api/applications/${item.id}/approve`, { method: "POST" }); await refresh(); }}>Approve</button>
-                    <button className="min-h-10 border border-white/20 px-3 text-xs uppercase" type="button" onClick={async () => { await workerRequest(`/api/applications/${item.id}/reject`, { method: "POST" }); await refresh(); }}>Reject</button>
-                  </div>
-                </article>
-              ))}
-            </section>
-            <section>
-              <h2 className="mb-3 font-display text-2xl">Profiles</h2>
-              {adminProfiles.map((item) => (
-                <article key={item.id} className="mb-2 border border-white/10 p-3 text-sm">
-                  {item.first_name || item.user_id} · {item.city}
-                </article>
-              ))}
-            </section>
-            <section>
-              <h2 className="mb-3 font-display text-2xl">Blog</h2>
-              {adminBlog.map((item) => (
-                <article key={item.id} className="mb-3 border border-white/10 p-3 text-sm">
-                  <p>{item.title || item.slug}</p>
-                  <button className="mt-2 min-h-10 border border-gold px-3 text-xs uppercase text-gold" type="button" onClick={async () => { await workerRequest(`/api/admin/blog/${item.id}/publish`, { method: "POST" }); await refresh(); }}>Publish</button>
-                </article>
-              ))}
-            </section>
+            <button className={ghostBtn} type="button" onClick={() => { setSessionToken(null); setMe(null); setAdminMode(false); }}>{t.signOut}</button>
           </div>
         ) : null}
       </main>
       <nav className="fixed inset-x-0 bottom-0 grid grid-cols-3 gap-1 border-t border-white/10 bg-[#070709] px-2 py-2 md:grid-cols-6">
         {tabs.map((item) => (
-          <button key={item.id} type="button" onClick={() => setTab(item.id)} className={`min-h-11 px-1 text-[10px] uppercase tracking-[0.08em] ${tab === item.id ? "text-gold" : "text-ivory/50"}`}>
+          <button key={item.id} type="button" onClick={() => {
+            if (item.id === "admin") {
+              setAdminMode(true);
+              return;
+            }
+            setTab(item.id);
+          }} className={`min-h-11 px-1 text-[10px] uppercase tracking-[0.08em] ${tab === item.id ? "text-gold" : "text-ivory/50"}`}>
             {item.label}
           </button>
         ))}

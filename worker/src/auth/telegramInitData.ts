@@ -11,6 +11,8 @@ export type TelegramWebAppUser = {
 export type TelegramInitData = {
   user: TelegramWebAppUser;
   authDate: number;
+  startParam: string;
+  chatType: string;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -72,8 +74,26 @@ export async function validateTelegramInitData(
     throw new Error("INVALID_INIT_DATA");
   }
 
+  const startParam = params.get("start_param") || "";
+  let chatType = params.get("chat_type") || "";
+  if (!chatType) {
+    const rawChat = params.get("chat");
+    if (rawChat) {
+      try {
+        const chat = JSON.parse(rawChat) as { type?: unknown };
+        if (typeof chat.type === "string") {
+          chatType = chat.type;
+        }
+      } catch {
+        chatType = "";
+      }
+    }
+  }
+
   return {
     authDate,
+    startParam: /^[A-Za-z0-9_-]{1,64}$/.test(startParam) ? startParam : "",
+    chatType,
     user: {
       id: parsed.id,
       first_name: typeof parsed.first_name === "string" ? parsed.first_name : undefined,

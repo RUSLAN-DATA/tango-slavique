@@ -26,6 +26,18 @@ export async function telegramApi(
   return response.json();
 }
 
+export async function telegramApiCatch(
+  env: Env,
+  method: string,
+  payload: Record<string, unknown>
+): Promise<unknown | null> {
+  try {
+    return await telegramApi(env, method, payload);
+  } catch {
+    return null;
+  }
+}
+
 export function sendTelegramMessage(
   env: Env,
   chatId: number | string,

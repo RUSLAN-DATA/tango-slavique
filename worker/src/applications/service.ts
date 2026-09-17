@@ -1,6 +1,7 @@
 import type { Env } from "../env";
 import { newId, nowIso } from "../crypto";
 import { sendAdminMessage } from "../telegram/notifications";
+import { applicationActionKeyboard } from "../telegram/miniAppLinks";
 
 export const APPLICATION_STATUSES = [
   "new",
@@ -25,19 +26,8 @@ export type ApplicationRow = {
   updated_at: string;
 };
 
-function applicationKeyboard(id: string) {
-  return {
-    inline_keyboard: [
-      [
-        { text: "👀 View", callback_data: `o:${id}` },
-        { text: "✅ Approve", callback_data: `y:${id}` },
-      ],
-      [
-        { text: "❌ Reject", callback_data: `n:${id}` },
-        { text: "💬 Need info", callback_data: `i:${id}` },
-      ],
-    ],
-  };
+function applicationKeyboard(env: Env, id: string) {
+  return applicationActionKeyboard(env, id);
 }
 
 function applicationNotice(row: ApplicationRow): string {
@@ -97,7 +87,7 @@ export async function createApplication(
   }
   try {
     notified = await sendAdminMessage(env, applicationNotice(application), {
-      reply_markup: applicationKeyboard(id),
+      reply_markup: applicationKeyboard(env, id),
     });
     await env.DB.prepare(
       `INSERT INTO notifications (id, user_id, channel, type, payload, status, created_at)
