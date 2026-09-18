@@ -30,6 +30,8 @@ export async function ensureTelegramRuntime(env: Env): Promise<void> {
       });
     }
 
+    await ensureAdminGroupHub(env).catch(() => undefined);
+
     const throttle = await enforceRateLimit(
       env,
       "telegram:runtime-setup",
@@ -53,7 +55,6 @@ export async function ensureTelegramRuntime(env: Env): Promise<void> {
     }).catch(() => undefined);
 
     await ensureAdminGroupCommands(env).catch(() => undefined);
-    await ensureAdminGroupHub(env).catch(() => undefined);
   } catch {
     console.error("Telegram runtime setup failed");
   }

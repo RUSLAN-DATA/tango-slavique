@@ -1,6 +1,11 @@
 import type { Env } from "../env";
 import { telegramApi, telegramApiCatch, sendTelegramMessage } from "./api";
-import { ADMIN_HUB_TEXT, adminPanelButton } from "./miniAppLinks";
+import {
+  ADMIN_HUB_TEXT,
+  adminPanelButton,
+  isBrokenGroupMiniAppUrl,
+  miniAppHttpsUrl,
+} from "./miniAppLinks";
 import { enforceRateLimit } from "../rateLimit";
 
 function adminChatId(env: Env): string | null {
@@ -26,6 +31,9 @@ type ChatInfo = {
     pinned_message?: {
       message_id?: number;
       text?: string;
+      reply_markup?: {
+        inline_keyboard?: Array<Array<{ url?: string; web_app?: { url?: string } }>>;
+      };
     };
   };
 };
@@ -35,11 +43,49 @@ type SendResult = {
   result?: { message_id?: number };
 };
 
+type PinnedMessage = NonNullable<NonNullable<ChatInfo["result"]>["pinned_message"]>;
+
 function pinnedLooksLikeHub(text: string | undefined): boolean {
   if (!text) {
     return false;
   }
   return text.includes("TANGO SLAVIQUE ADMIN") && text.includes("Admin Panel");
+}
+
+function pinnedHubLaunchIsBroken(env: Env, pinned: PinnedMessage | undefined): boolean {
+  const buttons = pinned?.reply_markup?.inline_keyboard?.flat() || [];
+  if (!buttons.length) {
+    return true;
+  }
+  return buttons.some(
+    (button) =>
+      Boolean(button.web_app) ||
+      (typeof button.url === "string" && isBrokenGroupMiniAppUrl(button.url, env))
+  );
+}
+
+export async function sendPrivateAdminPanel(
+  env: Env,
+  telegramUserId: string,
+  startParam = "admin"
+): Promise<boolean> {
+  try {
+    await sendTelegramMessage(env, telegramUserId, "Open the Admin Panel.", {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: "🛠 Admin Panel",
+              web_app: { url: miniAppHttpsUrl(env, startParam) },
+            },
+          ],
+        ],
+      },
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function ensureAdminGroupHub(env: Env): Promise<void> {
@@ -51,15 +97,18 @@ export async function ensureAdminGroupHub(env: Env): Promise<void> {
   const chat = (await telegramApiCatch(env, "getChat", {
     chat_id: chatId,
   })) as ChatInfo | null;
-  if (pinnedLooksLikeHub(chat?.result?.pinned_message?.text)) {
+  const pinned = chat?.result?.pinned_message;
+  const looksLikeHub = pinnedLooksLikeHub(pinned?.text);
+  const broken = pinnedHubLaunchIsBroken(env, pinned);
+  if (looksLikeHub && !broken) {
     return;
   }
 
   const allowed = await enforceRateLimit(
     env,
-    "telegram:admin-hub",
+    looksLikeHub ? "telegram:admin-hub-repair-startlink" : "telegram:admin-hub",
     1,
-    7 * 24 * 60 * 60 * 1000
+    looksLikeHub ? 15 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000
   ).catch(() => false);
   if (!allowed) {
     return;

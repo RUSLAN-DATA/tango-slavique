@@ -7,7 +7,7 @@ import { downloadTelegramFile } from "./api";
 import { handleAdminCallback, sendAdminHome } from "./adminActions";
 import { handleAdminMedia } from "./adminInbox";
 import { sendTelegramMessage } from "./api";
-import { sendAdminHub } from "./adminHub";
+import { sendAdminHub, sendPrivateAdminPanel } from "./adminHub";
 import { isAdminPanelCommand, miniAppHttpsUrl } from "./miniAppLinks";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -103,8 +103,10 @@ function documentImageId(message: Record<string, unknown>): string | null {
 async function handleStart(
   env: Env,
   chatId: number | string,
-  admin: boolean
+  admin: boolean,
+  startParam?: string
 ): Promise<void> {
+  const param = startParam || (admin ? "admin" : "");
   await sendTelegramMessage(
     env,
     chatId,
@@ -114,8 +116,8 @@ async function handleStart(
     {
       reply_markup: {
         inline_keyboard: admin
-          ? [[{ text: "🛠 Admin Panel", web_app: { url: miniAppUrl(env, "admin") } }]]
-          : [[{ text: "Open Mini App", web_app: { url: miniAppUrl(env) } }]],
+          ? [[{ text: "🛠 Admin Panel", web_app: { url: miniAppUrl(env, param || "admin") } }]]
+          : [[{ text: "Open Mini App", web_app: { url: miniAppUrl(env, param || undefined) } }]],
       },
     }
   );
@@ -145,8 +147,9 @@ async function processUpdate(env: Env, update: unknown): Promise<void> {
     const photoId = largestPhotoId(message) || documentImageId(message);
 
     if (chatId !== null && isPrivateChat(chatType)) {
-      if (/^\/start(?:@\w+)?(?:\s|$)/i.test(text)) {
-        await handleStart(env, chatId, admin);
+      const start = text.match(/^\/start(?:@\w+)?(?:\s+(\S+))?$/i);
+      if (start) {
+        await handleStart(env, chatId, admin, start[1] || undefined);
         return;
       }
       if (isAdminPanelCommand(text)) {
@@ -182,7 +185,8 @@ async function processUpdate(env: Env, update: unknown): Promise<void> {
 
     if (chatId !== null && inAdminGroup) {
       if (isAdminPanelCommand(text) || /^\/start(?:@\w+)?(?:\s|$)/i.test(text)) {
-        if (admin) {
+        if (admin && userId) {
+          await sendPrivateAdminPanel(env, userId).catch(() => false);
           await sendAdminHub(env, chatId, "url");
         }
         return;

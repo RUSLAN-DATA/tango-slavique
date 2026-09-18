@@ -15,17 +15,36 @@ export function miniAppHttpsUrl(env: Env, startParam?: string): string {
 }
 
 /**
- * Telegram Direct Link to the Mini App. Inline web_app buttons only work in
- * private chats, so group messages use this t.me URL instead.
+ * Group-safe Mini App launch URL.
+ *
+ * Inline `web_app` buttons only work in private chats. `t.me/bot?startapp=`
+ * launches a Main/Direct Link Mini App inside the current chat and Telegram
+ * shows "Bot invalid" unless BotFather has a named Mini App (short_name).
+ *
+ * Named Direct Links (`t.me/bot/<shortName>?startapp=`) open the Mini App
+ * in any chat. Without a short name, fall back to `t.me/bot?start=` which
+ * opens the private bot; the bot then sends a real `web_app` button.
  */
 export function miniAppStartLink(env: Env, startParam = "admin"): string {
   const username = telegramBotUsername(env);
   const shortName = env.TELEGRAM_MINIAPP_SHORT_NAME?.trim();
-  const query = `?startapp=${encodeURIComponent(startParam)}`;
+  const payload = encodeURIComponent(startParam);
   if (shortName) {
-    return `https://t.me/${username}/${shortName}${query}`;
+    return `https://t.me/${username}/${shortName}?startapp=${payload}`;
   }
-  return `https://t.me/${username}${query}`;
+  return `https://t.me/${username}?start=${payload}`;
+}
+
+export function isBrokenGroupMiniAppUrl(url: string, env: Env): boolean {
+  if (!url) {
+    return true;
+  }
+  const username = telegramBotUsername(env);
+  const shortName = env.TELEGRAM_MINIAPP_SHORT_NAME?.trim();
+  if (shortName) {
+    return !url.includes(`t.me/${username}/${shortName}`);
+  }
+  return /(?:\?|&)startapp=/.test(url) || /t\.me\/[^/]+\/[^/?]+/.test(url);
 }
 
 export function adminPanelButton(env: Env, kind: "web_app" | "url") {

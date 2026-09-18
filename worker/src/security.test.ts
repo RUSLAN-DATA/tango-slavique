@@ -12,6 +12,7 @@ import {
   applicationActionKeyboard,
   adminPanelButton,
   isAdminPanelCommand,
+  isBrokenGroupMiniAppUrl,
   miniAppStartLink,
   parseMiniAppStartParam,
 } from "./telegram/miniAppLinks";
@@ -363,8 +364,14 @@ describe("admin panel links", () => {
 
   it("builds a Telegram Mini App link for every administrator", () => {
     expect(miniAppStartLink(env, "admin")).toBe(
-      "https://t.me/Tangoslavique_bot?startapp=admin"
+      "https://t.me/Tangoslavique_bot?start=admin"
     );
+    expect(
+      miniAppStartLink(
+        { ...env, TELEGRAM_MINIAPP_SHORT_NAME: "app" } as Env,
+        "admin"
+      )
+    ).toBe("https://t.me/Tangoslavique_bot/app?startapp=admin");
     expect(isAdminPanelCommand("/admin")).toBe(true);
     expect(isAdminPanelCommand("/panel@Tangoslavique_bot")).toBe(true);
     expect(isAdminPanelCommand("hello")).toBe(false);
@@ -374,11 +381,18 @@ describe("admin panel links", () => {
     const keyboard = applicationActionKeyboard(env, "abc123def4567890");
     const open = keyboard.inline_keyboard[0][0] as { text: string; url?: string };
     expect(open.text).toBe("👁 Open");
-    expect(open.url).toContain("startapp=app_abc123def4567890");
+    expect(open.url).toBe("https://t.me/Tangoslavique_bot?start=app_abc123def4567890");
     const urlButton = adminPanelButton(env, "url") as { url: string };
     const webButton = adminPanelButton(env, "web_app") as { web_app: { url: string } };
-    expect(urlButton.url).toContain("startapp=admin");
+    expect(urlButton.url).toBe("https://t.me/Tangoslavique_bot?start=admin");
+    expect(webButton.web_app.url).toContain("/miniapp");
     expect(webButton.web_app.url).toContain("startapp=admin");
+    expect(
+      isBrokenGroupMiniAppUrl("https://t.me/Tangoslavique_bot?startapp=admin", env)
+    ).toBe(true);
+    expect(
+      isBrokenGroupMiniAppUrl("https://t.me/Tangoslavique_bot?start=admin", env)
+    ).toBe(false);
   });
 
   it("parses Mini App start params", () => {
