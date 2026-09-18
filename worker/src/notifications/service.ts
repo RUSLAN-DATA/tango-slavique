@@ -37,6 +37,8 @@ export async function notifyUser(
   if (!important) {
     return;
   }
+  const extra = typeof payload.message === "string" ? payload.message.trim() : "";
+  const text = extra ? `${important}\n\n${extra}` : important;
   const user = await env.DB.prepare(
     "SELECT telegram_user_id FROM users WHERE id = ?"
   )
@@ -45,5 +47,5 @@ export async function notifyUser(
   if (!user?.telegram_user_id) {
     return;
   }
-  await sendTelegramMessage(env, user.telegram_user_id, important).catch(() => undefined);
+  await sendTelegramMessage(env, user.telegram_user_id, text).catch(() => undefined);
 }

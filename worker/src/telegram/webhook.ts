@@ -4,11 +4,13 @@ import { timingSafeEqual } from "../crypto";
 import { isTelegramAdmin, parseTelegramAdminIds } from "./adminIds";
 import { answerTelegramCallbackQuery } from "./api";
 import { downloadTelegramFile } from "./api";
-import { handleAdminCallback, sendAdminHome } from "./adminActions";
+import { handleAdminCallback } from "./adminActions";
 import { handleAdminMedia } from "./adminInbox";
 import { sendTelegramMessage } from "./api";
-import { sendAdminHub, sendPrivateAdminPanel } from "./adminHub";
+import { sendAdminHub, sendPrivateAdminPanel, sendAdminMenu } from "./adminHub";
 import { isAdminPanelCommand, miniAppHttpsUrl } from "./miniAppLinks";
+import { handleCmsMessage } from "./cms";
+import { menuActionForText } from "./cmsCopy";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -82,11 +84,18 @@ function largestPhotoId(message: Record<string, unknown>): string | null {
   if (!Array.isArray(message.photo) || message.photo.length === 0) {
     return null;
   }
-  const last = message.photo[message.photo.length - 1];
-  if (isRecord(last) && typeof last.file_id === "string") {
-    return last.file_id;
+  let best: { file_id: string; score: number } | null = null;
+  for (const item of message.photo) {
+    if (!isRecord(item) || typeof item.file_id !== "string") continue;
+    const width = typeof item.width === "number" ? item.width : 0;
+    const height = typeof item.height === "number" ? item.height : 0;
+    const size = typeof item.file_size === "number" ? item.file_size : width * height;
+    const score = size || width * height;
+    if (!best || score >= best.score) {
+      best = { file_id: item.file_id, score };
+    }
   }
-  return null;
+  return best?.file_id || null;
 }
 
 function documentImageId(message: Record<string, unknown>): string | null {
@@ -100,30 +109,43 @@ function documentImageId(message: Record<string, unknown>): string | null {
   return message.document.file_id;
 }
 
+function documentImageMime(message: Record<string, unknown>): string | null {
+  if (!isRecord(message.document)) {
+    return null;
+  }
+  const mime = typeof message.document.mime_type === "string" ? message.document.mime_type : "";
+  return mime.startsWith("image/") ? mime : null;
+}
+
+function mimeFromPath(path: string): string {
+  const lower = path.toLowerCase();
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".gif")) return "image/gif";
+  return "image/jpeg";
+}
+
 async function handleStart(
   env: Env,
   chatId: number | string,
   admin: boolean,
-  startParam?: string
+  startParam?: string,
+  adminId?: string | null
 ): Promise<void> {
-  const param = startParam || (admin ? "admin" : "");
+  if (admin && adminId) {
+    await sendAdminMenu(env, chatId, adminId);
+    return;
+  }
   await sendTelegramMessage(
     env,
     chatId,
-    admin
-      ? "Welcome. Open the Admin Panel, or use the buttons below."
-      : "Welcome to Tango Slavique. Open Mini App to create your profile.",
+    "Welcome to Tango Slavique. Open Mini App to create your profile.",
     {
       reply_markup: {
-        inline_keyboard: admin
-          ? [[{ text: "🛠 Admin Panel", web_app: { url: miniAppUrl(env, param || "admin") } }]]
-          : [[{ text: "Open Mini App", web_app: { url: miniAppUrl(env, param || undefined) } }]],
+        inline_keyboard: [[{ text: "Open Mini App", web_app: { url: miniAppUrl(env, startParam || undefined) } }]],
       },
     }
   );
-  if (admin) {
-    await sendAdminHome(env, chatId);
-  }
 }
 
 async function processUpdate(env: Env, update: unknown): Promise<void> {
@@ -144,40 +166,49 @@ async function processUpdate(env: Env, update: unknown): Promise<void> {
     const text = getMessageText(message).trim();
     const chatType = getChatType(message);
     const inAdminGroup = isAdminGroup(env, chatId);
-    const photoId = largestPhotoId(message) || documentImageId(message);
+    const photoId = documentImageId(message) || largestPhotoId(message);
 
     if (chatId !== null && isPrivateChat(chatType)) {
       const start = text.match(/^\/start(?:@\w+)?(?:\s+(\S+))?$/i);
       if (start) {
-        await handleStart(env, chatId, admin, start[1] || undefined);
+        await handleStart(env, chatId, admin, start[1] || undefined, userId);
         return;
       }
       if (isAdminPanelCommand(text)) {
-        if (admin) {
-          await sendAdminHub(env, chatId, "web_app");
+        if (admin && userId) {
+          await sendAdminMenu(env, chatId, userId);
         }
         return;
       }
       if (admin) {
-        if (/^\/(applications|profiles|blog)(?:@\w+)?$/i.test(text)) {
+        const menu = menuActionForText(text);
+        if (menu) {
+          await handleAdminCallback(env, userId || "", "0", `m:${menu}`, chatId);
+          return;
+        }
+        const file = photoId ? await downloadTelegramFile(env, photoId) : null;
+        const media = file
+          ? {
+              bytes: file.bytes,
+              mime: documentImageMime(message) || mimeFromPath(file.path),
+            }
+          : null;
+        if (await handleCmsMessage(env, userId || "", chatId, text, media)) {
+          return;
+        }
+        if (/^\/(applications|profiles|notifications|settings)(?:@\w+)?$/i.test(text)) {
           const map: Record<string, string> = {
             applications: "m:apps",
             profiles: "m:prof",
-            blog: "m:blog",
+            notifications: "m:notifications",
+            settings: "m:settings",
           };
           const key = text.replace(/^\//, "").replace(/@\w+$/, "").toLowerCase();
           await handleAdminCallback(env, userId || "", "0", map[key] || "m:apps", chatId);
           return;
         }
         if (photoId || text) {
-          const file = photoId ? await downloadTelegramFile(env, photoId) : null;
-          await handleAdminMedia(
-            env,
-            userId || "",
-            chatId,
-            text,
-            file ? { bytes: file.bytes, mime: "image/jpeg" } : null
-          );
+          await handleAdminMedia(env, userId || "", chatId, text, media);
           return;
         }
       }
@@ -186,30 +217,39 @@ async function processUpdate(env: Env, update: unknown): Promise<void> {
     if (chatId !== null && inAdminGroup) {
       if (isAdminPanelCommand(text) || /^\/start(?:@\w+)?(?:\s|$)/i.test(text)) {
         if (admin && userId) {
-          await sendPrivateAdminPanel(env, userId).catch(() => false);
-          await sendAdminHub(env, chatId, "url");
+          if (env.TELEGRAM_MINIAPP_SHORT_NAME?.trim()) {
+            await sendAdminHub(env, chatId, "url");
+          } else {
+            await sendPrivateAdminPanel(env, userId);
+          }
         }
         return;
       }
-      if (admin && (photoId || /^\/(blog|applications|profiles)/i.test(text))) {
-        if (/^\/(applications|profiles|blog)/i.test(text) && !photoId) {
-          const key = text.replace(/^\//, "").split(/\s+/)[0].toLowerCase();
+      if (admin) {
+        const file = photoId ? await downloadTelegramFile(env, photoId) : null;
+        const media = file
+          ? {
+              bytes: file.bytes,
+              mime: documentImageMime(message) || mimeFromPath(file.path),
+            }
+          : null;
+        if (await handleCmsMessage(env, userId || "", chatId, text, media)) {
+          return;
+        }
+        if (/^\/(applications|profiles|notifications|settings)/i.test(text) && !photoId) {
+          const key = text.replace(/^\//, "").split(/\s+/)[0].replace(/@\w+$/, "").toLowerCase();
           const map: Record<string, string> = {
             applications: "m:apps",
             profiles: "m:prof",
-            blog: "m:blog",
+            notifications: "m:notifications",
+            settings: "m:settings",
           };
-          await handleAdminCallback(env, userId || "", "0", map[key] || "m:blog", chatId);
+          await handleAdminCallback(env, userId || "", "0", map[key] || "m:apps", chatId);
           return;
         }
-        const file = photoId ? await downloadTelegramFile(env, photoId) : null;
-        await handleAdminMedia(
-          env,
-          userId || "",
-          chatId,
-          text,
-          file ? { bytes: file.bytes, mime: "image/jpeg" } : null
-        );
+        if (photoId || text) {
+          await handleAdminMedia(env, userId || "", chatId, text, media);
+        }
       }
     }
   }

@@ -54,9 +54,9 @@ export function BlogArticle({ slug }: { slug: string }) {
           ← Back
         </Link>
         {cover ? (
-          <div className="mt-10 aspect-[16/9] overflow-hidden">
+          <div className="mt-10 bg-black/20">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={cover} alt="" className="h-full w-full object-cover" />
+            <img src={cover} alt="" className="mx-auto max-h-[70vh] w-full object-contain" />
           </div>
         ) : null}
         <h1 className="mt-10 font-serif text-3xl text-white sm:text-4xl">{title || "…"}</h1>

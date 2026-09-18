@@ -1,5 +1,5 @@
 import type { Env } from "../env";
-import { newId, nowIso } from "../crypto";
+import { nowIso } from "../crypto";
 import {
   getApplication,
   listApplications,
@@ -11,9 +11,7 @@ import { listPhotos } from "../photos/service";
 import { overridePhotoReview } from "../photos/review";
 import {
   generateBlogLocale,
-  listBlogDrafts,
   publishArticle,
-  unpublishArticle,
   deleteArticle,
   articleWithTranslations,
 } from "../blog/service";
@@ -21,7 +19,11 @@ import { isTelegramAdmin, parseTelegramAdminIds } from "./adminIds";
 import { answerTelegramCallbackQuery, sendTelegramMessage, sendTelegramPhotoFile } from "./api";
 import { attachLatestInbox } from "./adminInbox";
 import { sendProfileCard, setProfileVisibility } from "./profileCards";
-import { applicationActionKeyboard, adminPanelButton, miniAppStartLink } from "./miniAppLinks";
+import { applicationActionKeyboard, miniAppStartLink } from "./miniAppLinks";
+import { handleCmsCallback, listBlogsCommand, startContent } from "./cms";
+import { copyFor, localeForAdmin } from "./cmsCopy";
+import { sendAdminMenu } from "./adminHub";
+import { setWorkflow } from "../workflows/service";
 
 async function approveUser(env: Env, userId: string, adminId: string) {
   await setProfileVisibility(env, userId, "public");
@@ -67,6 +69,13 @@ export async function handleAdminCallback(
     await sendTelegramMessage(env, chatId, text);
   };
 
+  if (data.startsWith("b:") || data.startsWith("c:")) {
+    await answerTelegramCallbackQuery(env, callbackId);
+    if (await handleCmsCallback(env, fromId, chatId, data)) {
+      return;
+    }
+  }
+
   const appLegacy = data.match(/^([oyni]):([a-f0-9]{8,32})$/i);
   if (appLegacy) {
     const action = appLegacy[1].toLowerCase();
@@ -91,8 +100,18 @@ export async function handleAdminCallback(
       );
       return;
     }
-    const status: ApplicationStatus =
-      action === "y" ? "approved" : action === "n" ? "rejected" : "info_requested";
+    if (action === "i") {
+      const t = copyFor(await localeForAdmin(env, fromId));
+      await setWorkflow(env, fromId, {
+        workflow: "NEED_INFO",
+        step: "WAITING_TEXT",
+        extra: { applicationId: application.id },
+      });
+      await answerTelegramCallbackQuery(env, callbackId);
+      await reply(t.needInfoAsk);
+      return;
+    }
+    const status: ApplicationStatus = action === "y" ? "approved" : "rejected";
     await updateApplicationStatus(env, application.id, status, fromId);
     if (status === "approved" && application.user_id) {
       await approveUser(env, application.user_id, fromId);
@@ -101,32 +120,70 @@ export async function handleAdminCallback(
     await reply(
       status === "approved"
         ? "Approved. The profile is now visible to the team."
-        : status === "rejected"
-          ? "Rejected. The profile stays private."
-          : "Asked for a little more information."
+        : "Rejected. The profile stays private."
     );
     return;
   }
 
-  if (data === "m:apps") {
-    const items = await listApplications(env);
+  if (data === "m:admin") {
     await answerTelegramCallbackQuery(env, callbackId);
+    await sendAdminMenu(env, chatId, fromId);
+    return;
+  }
+
+  if (data === "m:apps" || data === "m:applications" || data.startsWith("m:apps:")) {
+    const t = copyFor(await localeForAdmin(env, fromId));
+    const filter = data.startsWith("m:apps:") ? data.slice("m:apps:".length) : "new";
+    const status =
+      filter === "approved"
+        ? "approved"
+        : filter === "rejected"
+          ? "rejected"
+          : filter === "info" || filter === "info_requested"
+            ? "info_requested"
+            : "new";
+    const items = await listApplications(env, status);
+    await answerTelegramCallbackQuery(env, callbackId);
+    await sendTelegramMessage(env, chatId, t.chooseReview, {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: t.pending, callback_data: "m:apps:new" },
+            { text: t.needsInfo, callback_data: "m:apps:info" },
+          ],
+          [
+            { text: t.approved, callback_data: "m:apps:approved" },
+            { text: t.rejected, callback_data: "m:apps:rejected" },
+          ],
+        ],
+      },
+    });
     if (!items.length) {
-      await reply("No applications yet.");
+      await reply(t.noApplications);
       return;
     }
     for (const item of items.slice(0, 8)) {
       await sendTelegramMessage(
         env,
         chatId,
-        `👩 ${item.name || "Application"}\n📍 ${item.city || "—"}`,
+        `👩 ${item.name || t.btnApplications}\n📍 ${item.city || "—"}\n${
+          item.status === "new"
+            ? t.pending
+            : item.status === "info_requested"
+              ? t.needsInfo
+              : item.status === "approved"
+                ? t.approved
+                : item.status === "rejected"
+                  ? t.rejected
+                  : item.status
+        }`,
         { reply_markup: applicationActionKeyboard(env, item.id) }
       );
     }
     return;
   }
 
-  if (data === "m:prof") {
+  if (data === "m:prof" || data === "m:profiles") {
     await answerTelegramCallbackQuery(env, callbackId);
     const rows = await env.DB.prepare(
       "SELECT user_id, first_name, city, status FROM profiles ORDER BY updated_at DESC LIMIT 8"
@@ -158,32 +215,57 @@ export async function handleAdminCallback(
 
   if (data === "m:blog") {
     await answerTelegramCallbackQuery(env, callbackId);
-    const items = await listBlogDrafts(env);
-    if (!items.length) {
-      await reply("No blog drafts. Send a photo plus text to create one.");
-      return;
-    }
-    const seen = new Set<string>();
-    for (const item of items) {
-      const row = item as Record<string, string>;
-      if (seen.has(row.id)) continue;
-      seen.add(row.id);
-      await sendTelegramMessage(
-        env,
-        chatId,
-        `${row.status === "published" ? "🌐" : "📝"} ${row.title || "Draft"}`,
-        {
-          reply_markup: {
-            inline_keyboard: [
-              [
-                { text: "🌐 Publish", callback_data: `b:p:${row.id}` },
-                { text: "👀 Preview", callback_data: `b:v:${row.id}` },
-              ],
-            ],
-          },
-        }
-      );
-    }
+    await listBlogsCommand(env, fromId, chatId);
+    return;
+  }
+
+  if (data === "m:content") {
+    await answerTelegramCallbackQuery(env, callbackId);
+    await startContent(env, fromId, chatId);
+    return;
+  }
+
+  if (data === "m:notifications") {
+    await answerTelegramCallbackQuery(env, callbackId);
+    const t = copyFor(await localeForAdmin(env, fromId));
+    const rows = await env.DB.prepare(
+      "SELECT type, status, created_at FROM notifications ORDER BY created_at DESC LIMIT 12"
+    ).all<{ type: string; status: string; created_at: string }>();
+    const items = rows.results || [];
+    await reply(
+      items.length
+        ? items.map((item) => `${item.type} · ${item.status}`).join("\n")
+        : t.btnNotifications
+    );
+    return;
+  }
+
+  if (data === "m:settings") {
+    await answerTelegramCallbackQuery(env, callbackId);
+    const t = copyFor(await localeForAdmin(env, fromId));
+    await sendTelegramMessage(env, chatId, t.btnLanguage, {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "🇬🇧 English", callback_data: "m:lang:en" },
+            { text: "🇷🇺 Русский", callback_data: "m:lang:ru" },
+            { text: "🇪🇸 Español", callback_data: "m:lang:es" },
+          ],
+        ],
+      },
+    });
+    return;
+  }
+
+  const langPick = data.match(/^m:lang:(en|es|ru)$/);
+  if (langPick) {
+    await env.DB.prepare("UPDATE users SET admin_locale = ?, updated_at = ? WHERE telegram_user_id = ?")
+      .bind(langPick[1], nowIso(), fromId)
+      .run();
+    await answerTelegramCallbackQuery(env, callbackId);
+    const t = copyFor(langPick[1] as "en" | "es" | "ru");
+    await sendTelegramMessage(env, chatId, t.languageSaved);
+    await sendAdminMenu(env, chatId, fromId);
     return;
   }
 
@@ -358,25 +440,9 @@ export async function handleAdminCallback(
 
 export async function sendAdminHome(
   env: Env,
-  chatId: number | string
+  chatId: number | string,
+  adminId?: string
 ): Promise<void> {
-  await sendTelegramMessage(
-    env,
-    chatId,
-    "Tango Slavique admin. Choose something to review.",
-    {
-      reply_markup: {
-        inline_keyboard: [
-          [adminPanelButton(env, "web_app")],
-          [
-            { text: "👤 Applications", callback_data: "m:apps" },
-            { text: "👩 Profiles", callback_data: "m:prof" },
-          ],
-          [{ text: "📚 Blog", callback_data: "m:blog" }],
-        ],
-      },
-    }
-  );
+  const id = adminId || String(chatId);
+  await sendAdminMenu(env, chatId, id);
 }
-
-export { newId };

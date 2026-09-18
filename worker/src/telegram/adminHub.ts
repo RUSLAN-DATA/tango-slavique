@@ -1,16 +1,38 @@
 import type { Env } from "../env";
 import { telegramApi, telegramApiCatch, sendTelegramMessage } from "./api";
-import {
-  ADMIN_HUB_TEXT,
-  adminPanelButton,
-  isBrokenGroupMiniAppUrl,
-  miniAppHttpsUrl,
-} from "./miniAppLinks";
+import { ADMIN_HUB_TEXT, adminPanelButton, isBrokenGroupMiniAppUrl, miniAppHttpsUrl } from "./miniAppLinks";
+import { copyFor, localeForAdmin, type AdminLocale } from "./cmsCopy";
 import { enforceRateLimit } from "../rateLimit";
 
 function adminChatId(env: Env): string | null {
   const value = env.TELEGRAM_ADMIN_CHAT_ID?.trim() ?? "";
   return /^-?\d+$/.test(value) ? value : null;
+}
+
+export function adminReplyKeyboard(env: Env, locale: AdminLocale) {
+  const t = copyFor(locale);
+  return {
+    keyboard: [
+      [{ text: t.btnAdmin, web_app: { url: miniAppHttpsUrl(env, "admin") } }],
+      [{ text: t.btnApplications }, { text: t.btnProfiles }],
+      [{ text: t.btnBlog }, { text: t.btnContent }],
+      [{ text: t.btnNotifications }, { text: t.btnSettings }],
+    ],
+    resize_keyboard: true,
+    is_persistent: true,
+  };
+}
+
+export async function sendAdminMenu(
+  env: Env,
+  chatId: number | string,
+  adminId: string
+): Promise<void> {
+  const locale = await localeForAdmin(env, adminId);
+  const t = copyFor(locale);
+  await sendTelegramMessage(env, chatId, t.welcomeAdmin, {
+    reply_markup: adminReplyKeyboard(env, locale),
+  });
 }
 
 export async function sendAdminHub(
@@ -67,21 +89,10 @@ function pinnedHubLaunchIsBroken(env: Env, pinned: PinnedMessage | undefined): b
 export async function sendPrivateAdminPanel(
   env: Env,
   telegramUserId: string,
-  startParam = "admin"
+  _startParam = "admin"
 ): Promise<boolean> {
   try {
-    await sendTelegramMessage(env, telegramUserId, "Open the Admin Panel.", {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: "🛠 Admin Panel",
-              web_app: { url: miniAppHttpsUrl(env, startParam) },
-            },
-          ],
-        ],
-      },
-    });
+    await sendAdminMenu(env, telegramUserId, telegramUserId);
     return true;
   } catch {
     return false;
@@ -137,7 +148,12 @@ export async function ensureAdminGroupCommands(env: Env): Promise<void> {
       { command: "admin", description: "Open Admin Panel" },
       { command: "applications", description: "Review applications" },
       { command: "profiles", description: "Review profiles" },
-      { command: "blog", description: "Blog drafts" },
+      { command: "blog", description: "Create a blog post" },
+      { command: "blogs", description: "Manage blog posts" },
+      { command: "content", description: "Edit website content" },
+      { command: "notifications", description: "Notifications" },
+      { command: "settings", description: "Language and settings" },
+      { command: "cancel", description: "Cancel current action" },
     ],
     scope: { type: "chat", chat_id: chatId },
   }).catch(() => undefined);

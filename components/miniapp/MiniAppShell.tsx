@@ -1,7 +1,6 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { useLanguage } from "@/lib/i18n/LanguageProvider";
 import {
   getSessionToken,
   setSessionToken,
@@ -11,10 +10,11 @@ import {
 import { miniCopy } from "@/components/miniapp/copy";
 import { AdminPanel } from "@/components/miniapp/AdminPanel";
 import { readClientStartContext, wantsAdminMode } from "@/lib/miniapp/startParam";
+import { adminLocales, isAdminLocale, type AdminLocale } from "@/lib/miniapp/adminCopy";
 
 type MiniCopy = (typeof miniCopy)[keyof typeof miniCopy];
 type Tab = "profile" | "photos" | "matches" | "preferences" | "alerts" | "settings" | "admin";
-type Me = { id: string; role: "user" | "admin"; status: string };
+type Me = { id: string; role: "user" | "admin"; status: string; adminLocale?: string };
 type Photo = { id: string; status: string; is_primary?: boolean };
 
 declare global {
@@ -44,9 +44,9 @@ const cardBtn =
   "min-h-14 w-full border border-white/10 px-4 py-3 text-left text-base text-ivory";
 
 function friendly(message?: string, fallback?: string) {
-  if (!message) return fallback || "Something went wrong. Please try again.";
+  if (!message) return fallback || "";
   if (/validation|sql|d1|internal|unauthorized/i.test(message) && message.includes(":")) {
-    return fallback || "Something went wrong. Please try again.";
+    return fallback || message;
   }
   return message;
 }
@@ -77,8 +77,12 @@ function PhotoThumb({ id, large }: { id: string; large?: boolean }) {
 }
 
 export function MiniAppShell() {
-  const { locale } = useLanguage();
-  const t = miniCopy[locale] || miniCopy.en;
+  const [uiLocale, setUiLocale] = useState<AdminLocale>(() => {
+    if (typeof window === "undefined") return "en";
+    const stored = window.localStorage.getItem("ts_admin_locale");
+    return isAdminLocale(stored) ? stored : "en";
+  });
+  const t = miniCopy[uiLocale] || miniCopy.en;
   const [tab, setTab] = useState<Tab>("profile");
   const [step, setStep] = useState(1);
   const [me, setMe] = useState<Me | null>(null);
@@ -129,6 +133,10 @@ export function MiniAppShell() {
       return;
     }
     setMe(meRes.data);
+    if (isAdminLocale(meRes.data.adminLocale)) {
+      setUiLocale(meRes.data.adminLocale);
+      window.localStorage.setItem("ts_admin_locale", meRes.data.adminLocale);
+    }
     setProfile(profileRes.data || {});
     setPreferences(prefRes.data || {});
     setPhotos(photosRes.data?.items || []);
@@ -268,14 +276,22 @@ export function MiniAppShell() {
           {error ? <p className="text-sm text-red-300">{error}</p> : null}
         </header>
         <main className="px-5 py-4">
-          <AdminPanel startParam={startParam} onExit={() => { setAdminMode(false); setTab("profile"); }} />
+          <AdminPanel
+            startParam={startParam}
+            locale={uiLocale}
+            onLocaleChange={(next) => {
+              setUiLocale(next);
+              window.localStorage.setItem("ts_admin_locale", next);
+            }}
+            onExit={() => { setAdminMode(false); setTab("profile"); }}
+          />
         </main>
       </div>
     );
   }
 
   return (
-    <div className="mx-auto min-h-screen max-w-lg pb-28">
+    <div className="mx-auto min-h-screen max-w-lg pb-[calc(9.5rem+var(--tg-safe-area-inset-bottom,env(safe-area-inset-bottom,0px)))]">
       <header className="px-5 pb-2 pt-6">
         <p className="text-[10px] uppercase tracking-[0.2em] text-gold">Tango Slavique</p>
         {error ? <p className="mt-2 text-sm text-red-300">{error}</p> : null}
@@ -411,10 +427,26 @@ export function MiniAppShell() {
         {tab === "preferences" ? (
           <div className="space-y-3">
             {(["relationship", "friendship", "marriage", "notSure"] as const).map((key) => (
-              <button key={key} type="button" className={`${cardBtn} ${preferences.intent === key ? "border-gold text-gold" : ""}`} onClick={() => void savePrefs({ ...preferences, intent: key })}>
+              <button
+                key={key}
+                type="button"
+                className={`${cardBtn} relative z-10 ${preferences.intent === key ? "border-gold text-gold" : ""}`}
+                onClick={() => {
+                  setPreferences((current) => ({ ...current, intent: key }));
+                  void savePrefs({ intent: key });
+                }}
+              >
                 {t[key]}
               </button>
             ))}
+            <button
+              className={goldBtn}
+              type="button"
+              disabled={busy}
+              onClick={() => void savePrefs({ intent: preferences.intent })}
+            >
+              {t.savePrefs}
+            </button>
           </div>
         ) : null}
 
@@ -435,11 +467,34 @@ export function MiniAppShell() {
         {tab === "settings" ? (
           <div className="space-y-4 text-ivory/70">
             <p>{String(profile.first_name || me.id.slice(0, 6))}</p>
+            <div>
+              <p className="text-xs uppercase tracking-[0.14em] text-gold">{t.language}</p>
+              <p className="mt-2 text-sm text-ivory/60">{t.languageHint}</p>
+              <div className="mt-3 grid grid-cols-1 gap-2">
+                {adminLocales.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={uiLocale === item.id ? goldBtn : ghostBtn}
+                    onClick={async () => {
+                      setUiLocale(item.id);
+                      window.localStorage.setItem("ts_admin_locale", item.id);
+                      await workerRequest("/api/me", {
+                        method: "PATCH",
+                        body: JSON.stringify({ adminLocale: item.id }),
+                      });
+                    }}
+                  >
+                    {item.flag} {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <button className={ghostBtn} type="button" onClick={() => { setSessionToken(null); setMe(null); setAdminMode(false); }}>{t.signOut}</button>
           </div>
         ) : null}
       </main>
-      <nav className="fixed inset-x-0 bottom-0 grid grid-cols-3 gap-1 border-t border-white/10 bg-[#070709] px-2 py-2 md:grid-cols-6">
+      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-3 gap-1 border-t border-white/10 bg-[#070709] px-2 pt-2 pb-[max(0.5rem,var(--tg-safe-area-inset-bottom,env(safe-area-inset-bottom,0px)))] md:grid-cols-6">
         {tabs.map((item) => (
           <button key={item.id} type="button" onClick={() => {
             if (item.id === "admin") {
@@ -632,7 +687,7 @@ function LookingStep({ t, busy, current, onBack, onContinue }: { t: MiniCopy; bu
     <div className="space-y-3">
       <p className="text-sm text-ivory/50">{t.stepLooking}</p>
       {(["relationship", "friendship", "marriage", "notSure"] as const).map((key) => (
-        <button key={key} type="button" className={`${cardBtn} ${intent === key ? "border-gold text-gold" : ""}`} onClick={() => setIntent(key)}>{t[key]}</button>
+        <button key={key} type="button" className={`${cardBtn} relative z-10 ${intent === key ? "border-gold text-gold" : ""}`} onClick={() => setIntent(key)}>{t[key]}</button>
       ))}
       <p className="pt-2 text-sm text-ivory/50">{t.stepWho}</p>
       <button type="button" className={`${cardBtn} ${gender === "man" ? "border-gold text-gold" : ""}`} onClick={() => setGender("man")}>{t.aMan}</button>

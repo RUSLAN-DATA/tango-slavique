@@ -27,14 +27,27 @@ import { notifyNewProfile } from "./telegram/profileCards";
 import { ageFromBirthDate, birthDateFromAge } from "./profile/age";
 import {
   articleWithTranslations,
+  createBlogDraft,
   deleteArticle,
   generateBlogLocale,
   listBlogDrafts,
   listPublishedBlog,
   publishArticle,
   publicBlogView,
+  replaceBlogCover,
+  saveBlogFromAdmin,
   unpublishArticle,
 } from "./blog/service";
+import {
+  cancelContentDraft,
+  contentFields,
+  listContent,
+  publishContent,
+  publishedContentMap,
+  saveContentDraft,
+} from "./content/service";
+import { detectImageType, MAX_PHOTO_BYTES, validatePhoto } from "./photos/validate";
+import { contentFieldById } from "../../lib/content/catalog";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -170,6 +183,28 @@ export async function handleApi(
     );
   }
 
+  if (path === "/api/public/content" && method === "GET") {
+    const locale = url.searchParams.get("locale") === "es" ? "es" : "en";
+    const overrides = await publishedContentMap(env, locale);
+    return withCors(apiOk({ locale, overrides }));
+  }
+
+  const publicContentPage = path.match(
+    /^\/api\/public\/content\/(home|about|how|contact|footer)$/
+  );
+  if (publicContentPage && method === "GET") {
+    const locale = url.searchParams.get("locale") === "es" ? "es" : "en";
+    const all = await publishedContentMap(env, locale);
+    const fields = contentFields.filter((field) => field.page === publicContentPage[1]);
+    const overrides: Record<string, string> = {};
+    for (const field of fields) {
+      if (all[field.dictPath]) {
+        overrides[field.dictPath] = all[field.dictPath];
+      }
+    }
+    return withCors(apiOk({ locale, page: publicContentPage[1], overrides }));
+  }
+
   if (path === "/api/auth/telegram" && method === "POST") {
     return wrap(async () => {
       const body = await readJson(request);
@@ -208,14 +243,14 @@ export async function handleApi(
         id: user.id,
         role: isAdminUser(env, user) ? "admin" : "user",
         status: user.status,
-        adminLocale: isAdminUser(env, user) ? user.admin_locale || "en" : undefined,
+        adminLocale: user.admin_locale || "en",
       });
     });
   }
 
   if (path === "/api/me" && method === "PATCH") {
     return wrap(async () => {
-      const user = await requireAdmin(env, request);
+      const user = await requireUser(env, request);
       const body = await readJson(request);
       const locale = typeof body.adminLocale === "string" ? body.adminLocale : "";
       if (locale !== "en" && locale !== "es" && locale !== "ru") {
@@ -254,7 +289,17 @@ export async function handleApi(
     return wrap(async () => {
       const user = await requireUser(env, request);
       if (isAdminUser(env, user)) {
-        const status = url.searchParams.get("status") || undefined;
+        const statusParam = url.searchParams.get("status");
+        let status: string | undefined;
+        if (!statusParam || statusParam === "pending") {
+          status = "new";
+        } else if (statusParam === "all") {
+          status = undefined;
+        } else if (statusParam === "needs_information" || statusParam === "info") {
+          status = "info_requested";
+        } else {
+          status = statusParam;
+        }
         return apiOk({ items: await listApplications(env, status) });
       }
       const own = await env.DB.prepare(
@@ -280,11 +325,19 @@ export async function handleApi(
           : action === "reject"
             ? "rejected"
             : "info_requested";
+      let infoMessage = "";
+      try {
+        const body = await readJson(request);
+        if (typeof body.message === "string") infoMessage = body.message.trim().slice(0, 1000);
+      } catch {
+        infoMessage = "";
+      }
       const updated = await updateApplicationStatus(
         env,
         id,
         status,
-        user.telegram_user_id || user.id
+        user.telegram_user_id || user.id,
+        infoMessage || undefined
       );
       if (!updated) {
         return apiError("NOT_FOUND", "Application not found", 404);
@@ -424,16 +477,29 @@ export async function handleApi(
       )
         .bind(nowIso(), user.id)
         .run();
-      await createApplication(env, {
-        name: profile.first_name,
-        email: "",
-        phone: "",
-        city: profile.city || "",
-        message: profile.about || "",
-        source: "miniapp",
-        userId: user.id,
-        silent: true,
-      });
+      const open = await env.DB.prepare(
+        "SELECT id, status FROM applications WHERE user_id = ? ORDER BY created_at DESC LIMIT 1"
+      )
+        .bind(user.id)
+        .first<{ id: string; status: string }>();
+      if (open && (open.status === "info_requested" || open.status === "new")) {
+        await env.DB.prepare(
+          "UPDATE applications SET status = 'new', message = ?, updated_at = ? WHERE id = ?"
+        )
+          .bind(profile.about || "", nowIso(), open.id)
+          .run();
+      } else {
+        await createApplication(env, {
+          name: profile.first_name,
+          email: "",
+          phone: "",
+          city: profile.city || "",
+          message: profile.about || "",
+          source: "miniapp",
+          userId: user.id,
+          silent: true,
+        });
+      }
       await notifyNewProfile(env, user.id).catch(() => false);
       await notifyUser(env, user.id, "application_submitted", { source: "miniapp" });
       return apiOk({ submitted: true });
@@ -454,42 +520,41 @@ export async function handleApi(
       const body = await readJson(request);
       const now = nowIso();
       const existing = await env.DB.prepare(
-        "SELECT id FROM partner_preferences WHERE user_id = ?"
+        "SELECT * FROM partner_preferences WHERE user_id = ?"
       )
         .bind(user.id)
-        .first<{ id: string }>();
-      const payload = {
-        gender: typeof body.gender === "string" ? body.gender.slice(0, 40) : null,
-        age_min: typeof body.age_min === "number" ? body.age_min : null,
-        age_max: typeof body.age_max === "number" ? body.age_max : null,
-        city: typeof body.city === "string" ? body.city.slice(0, 80) : null,
-        country: typeof body.country === "string" ? body.country.slice(0, 80) : null,
+        .first<Record<string, unknown>>();
+      const asString = (value: unknown, max: number) =>
+        typeof value === "string" ? value.slice(0, max) : undefined;
+      const asNumber = (value: unknown) => (typeof value === "number" ? value : undefined);
+      const next = {
+        gender: asString(body.gender, 40) ?? (existing?.gender as string | null) ?? null,
+        age_min: asNumber(body.age_min) ?? (existing?.age_min as number | null) ?? null,
+        age_max: asNumber(body.age_max) ?? (existing?.age_max as number | null) ?? null,
+        city: asString(body.city, 80) ?? (existing?.city as string | null) ?? null,
+        country: asString(body.country, 80) ?? (existing?.country as string | null) ?? null,
         marital_status:
-          typeof body.marital_status === "string"
-            ? body.marital_status.slice(0, 40)
-            : null,
-        children:
-          typeof body.children === "string" ? body.children.slice(0, 40) : null,
-        languages:
-          typeof body.languages === "string" ? body.languages.slice(0, 200) : null,
-        intent: typeof body.intent === "string" ? body.intent.slice(0, 80) : null,
-        notes: typeof body.notes === "string" ? body.notes.slice(0, 500) : null,
+          asString(body.marital_status, 40) ?? (existing?.marital_status as string | null) ?? null,
+        children: asString(body.children, 40) ?? (existing?.children as string | null) ?? null,
+        languages: asString(body.languages, 200) ?? (existing?.languages as string | null) ?? null,
+        intent: asString(body.intent, 80) ?? (existing?.intent as string | null) ?? null,
+        notes: asString(body.notes, 500) ?? (existing?.notes as string | null) ?? null,
       };
       if (existing) {
         await env.DB.prepare(
           `UPDATE partner_preferences SET gender=?, age_min=?, age_max=?, city=?, country=?, marital_status=?, children=?, languages=?, intent=?, notes=?, updated_at=? WHERE user_id=?`
         )
           .bind(
-            payload.gender,
-            payload.age_min,
-            payload.age_max,
-            payload.city,
-            payload.country,
-            payload.marital_status,
-            payload.children,
-            payload.languages,
-            payload.intent,
-            payload.notes,
+            next.gender,
+            next.age_min,
+            next.age_max,
+            next.city,
+            next.country,
+            next.marital_status,
+            next.children,
+            next.languages,
+            next.intent,
+            next.notes,
             now,
             user.id
           )
@@ -502,16 +567,16 @@ export async function handleApi(
           .bind(
             newId(),
             user.id,
-            payload.gender,
-            payload.age_min,
-            payload.age_max,
-            payload.city,
-            payload.country,
-            payload.marital_status,
-            payload.children,
-            payload.languages,
-            payload.intent,
-            payload.notes,
+            next.gender,
+            next.age_min,
+            next.age_max,
+            next.city,
+            next.country,
+            next.marital_status,
+            next.children,
+            next.languages,
+            next.intent,
+            next.notes,
             now,
             now
           )
@@ -985,6 +1050,89 @@ export async function handleApi(
     });
   }
 
+  if (path === "/api/admin/blog" && method === "POST") {
+    return wrap(async () => {
+      const admin = await requireAdmin(env, request);
+      const body = await readJson(request);
+      const originalText = typeof body.originalText === "string" ? body.originalText.trim() : "";
+      const en = typeof body.en === "string" ? body.en : "";
+      const es = typeof body.es === "string" ? body.es : "";
+      if (!originalText && !en && !es) {
+        return apiError("VALIDATION_ERROR", "Please add the blog text.", 400);
+      }
+      const article = await createBlogDraft(env, {
+        text: originalText || en || es,
+        createdBy: admin.telegram_user_id || admin.id,
+        silent: true,
+        skipTranslate: Boolean(en || es),
+      });
+      await saveBlogFromAdmin(env, article.id, { originalText, en, es });
+      if (body.publish === true) {
+        const published = await publishArticle(env, article.id);
+        return apiOk(published);
+      }
+      return apiOk(article);
+    });
+  }
+
+  const adminBlogItem = path.match(/^\/api\/admin\/blog\/([a-f0-9]+)$/);
+  if (adminBlogItem && method === "GET") {
+    return wrap(async () => {
+      await requireAdmin(env, request);
+      const bundle = await articleWithTranslations(env, adminBlogItem[1]);
+      if (!bundle || bundle.article.status === "archived") {
+        return apiError("NOT_FOUND", "Article not found", 404);
+      }
+      return apiOk(bundle);
+    });
+  }
+
+  if (adminBlogItem && method === "PATCH") {
+    return wrap(async () => {
+      await requireAdmin(env, request);
+      const body = await readJson(request);
+      const updated = await saveBlogFromAdmin(env, adminBlogItem[1], {
+        originalText: typeof body.originalText === "string" ? body.originalText : undefined,
+        en: typeof body.en === "string" ? body.en : undefined,
+        es: typeof body.es === "string" ? body.es : undefined,
+      });
+      if (!updated) {
+        return apiError("NOT_FOUND", "Article not found", 404);
+      }
+      return apiOk(updated);
+    });
+  }
+
+  const adminBlogCover = path.match(/^\/api\/admin\/blog\/([a-f0-9]+)\/cover$/);
+  if (adminBlogCover && method === "POST") {
+    return wrap(async () => {
+      await requireAdmin(env, request);
+      const form = await request.formData();
+      const file = form.get("file");
+      if (!(file instanceof File)) {
+        return apiError("VALIDATION_ERROR", "Please add a photo.", 400);
+      }
+      const checked = validatePhoto({ type: file.type, size: file.size });
+      if (!checked.ok) {
+        return apiError("VALIDATION_ERROR", checked.message, 400);
+      }
+      const bytes = await file.arrayBuffer();
+      if (bytes.byteLength > MAX_PHOTO_BYTES) {
+        return apiError("VALIDATION_ERROR", "Image must be between 1 byte and 10 MB.", 400);
+      }
+      const detected = detectImageType(bytes);
+      if (!detected) {
+        return apiError("VALIDATION_ERROR", "Only JPEG, PNG and WEBP images are allowed.", 400);
+      }
+      const key = `blog/${adminBlogCover[1]}/${newId()}.${detected.ext}`;
+      await env.PHOTOS.put(key, bytes, {
+        httpMetadata: { contentType: detected.mime },
+      });
+      await replaceBlogCover(env, adminBlogCover[1], key);
+      return apiOk({ cover: `/api/public/blog/${adminBlogCover[1]}/cover` });
+    });
+  }
+
   const adminBlog = path.match(/^\/api\/admin\/blog\/([a-f0-9]+)\/(publish|en|es|unpublish|delete)$/);
   if (adminBlog && method === "POST") {
     return wrap(async () => {
@@ -1010,8 +1158,49 @@ export async function handleApi(
         }
         return apiOk({ deleted: true });
       }
-      const ok = await generateBlogLocale(env, adminBlog[1], adminBlog[2] as "en" | "es");
+      const ok = await generateBlogLocale(
+        env,
+        adminBlog[1],
+        adminBlog[2] as "en" | "es",
+        true
+      );
       return apiOk({ translated: ok });
+    });
+  }
+
+  if (path === "/api/admin/content" && method === "GET") {
+    return wrap(async () => {
+      await requireAdmin(env, request);
+      const page = url.searchParams.get("page") || undefined;
+      return apiOk({
+        catalog: contentFields.filter((field) => !page || field.page === page),
+        items: await listContent(env, page),
+      });
+    });
+  }
+
+  if (path === "/api/admin/content" && method === "PATCH") {
+    return wrap(async () => {
+      await requireAdmin(env, request);
+      const body = await readJson(request);
+      const fieldId = typeof body.fieldId === "string" ? body.fieldId : "";
+      const locale = body.locale === "es" ? "es" : "en";
+      if (!contentFieldById(fieldId)) {
+        return apiError("VALIDATION_ERROR", "Unknown content field", 400);
+      }
+      const action = typeof body.action === "string" ? body.action : "save";
+      if (action === "cancel") {
+        await cancelContentDraft(env, fieldId, locale);
+        return apiOk({ cancelled: true });
+      }
+      if (typeof body.draftValue === "string") {
+        await saveContentDraft(env, fieldId, locale, body.draftValue);
+      }
+      if (action === "publish") {
+        const published = await publishContent(env, fieldId, locale);
+        return apiOk(published);
+      }
+      return apiOk(await saveContentDraft(env, fieldId, locale, String(body.draftValue || "")));
     });
   }
 
@@ -1033,6 +1222,7 @@ export async function handleApi(
         users,
         notifications,
         pendingProfiles,
+        blogDrafts,
       ] = await Promise.all([
         count("SELECT COUNT(*) as n FROM applications"),
         count("SELECT COUNT(*) as n FROM applications WHERE status IN ('new','info_requested')"),
@@ -1044,6 +1234,7 @@ export async function handleApi(
         count("SELECT COUNT(*) as n FROM users"),
         count("SELECT COUNT(*) as n FROM notifications"),
         count("SELECT COUNT(*) as n FROM profiles WHERE status IN ('pending','draft')"),
+        count("SELECT COUNT(*) as n FROM blog_articles WHERE status = 'draft'"),
       ]);
       return apiOk({
         applications,
@@ -1056,6 +1247,7 @@ export async function handleApi(
         feedback,
         users,
         notifications,
+        blogDrafts,
       });
     });
   }

@@ -10,6 +10,7 @@ import {
   statusLabel,
   type AdminLocale,
 } from "@/lib/miniapp/adminCopy";
+import { contentPages, contentFields, defaultContentValue, type ContentField } from "@/lib/content/catalog";
 
 type Section =
   | "dashboard"
@@ -18,6 +19,7 @@ type Section =
   | "photos"
   | "matches"
   | "blog"
+  | "content"
   | "notifications"
   | "notes"
   | "settings"
@@ -29,6 +31,8 @@ type Section =
 type Props = {
   startParam?: string;
   onExit?: () => void;
+  locale?: AdminLocale;
+  onLocaleChange?: (next: AdminLocale) => void;
 };
 
 const STORAGE_KEY = "ts_admin_locale";
@@ -103,14 +107,15 @@ const primaryNav: Section[] = [
   "photos",
   "matches",
   "blog",
+  "content",
   "notifications",
   "notes",
   "settings",
 ];
 
-export function AdminPanel({ startParam, onExit }: Props) {
+export function AdminPanel({ startParam, onExit, locale: localeProp, onLocaleChange }: Props) {
   const parsed = parseMiniAppStartParam(startParam);
-  const [locale, setLocale] = useState<AdminLocale>("en");
+  const [locale, setLocale] = useState<AdminLocale>(localeProp || readStoredLocale());
   const t = adminCopy[locale];
   const [section, setSection] = useState<Section>((parsed?.section as Section) || "dashboard");
   const [selectedId, setSelectedId] = useState(parsed?.id || "");
@@ -149,12 +154,27 @@ export function AdminPanel({ startParam, onExit }: Props) {
   const [alerts, setAlerts] = useState<Array<Record<string, string>>>([]);
   const [history, setHistory] = useState<Array<Record<string, string>>>([]);
   const [blog, setBlog] = useState<Array<Record<string, string>>>([]);
+  const [blogForm, setBlogForm] = useState(false);
+  const [blogEditId, setBlogEditId] = useState("");
+  const [blogOriginal, setBlogOriginal] = useState("");
+  const [blogEn, setBlogEn] = useState("");
+  const [blogEs, setBlogEs] = useState("");
+  const [blogFile, setBlogFile] = useState<File | null>(null);
+  const [blogPreview, setBlogPreview] = useState(false);
+  const [contentRows, setContentRows] = useState<Array<Record<string, string>>>([]);
+  const [contentPage, setContentPage] = useState<(typeof contentPages)[number]["id"] | "">("");
+  const [contentFieldId, setContentFieldId] = useState("");
+  const [contentLocale, setContentLocale] = useState<"en" | "es">("en");
+  const [contentDraft, setContentDraft] = useState("");
+  const [contentPreview, setContentPreview] = useState(false);
   const [users, setUsers] = useState<Array<Record<string, string>>>([]);
   const [adminNotes, setAdminNotes] = useState<Array<Record<string, string>>>([]);
   const [note, setNote] = useState("");
   const [editName, setEditName] = useState("");
   const [editCity, setEditCity] = useState("");
   const [editAbout, setEditAbout] = useState("");
+  const [appFilter, setAppFilter] = useState<"new" | "info_requested" | "approved" | "rejected">("new");
+  const [infoDraft, setInfoDraft] = useState("");
 
   async function load() {
     const dash = await workerRequest<Record<string, number>>("/api/admin/dashboard");
@@ -163,15 +183,15 @@ export function AdminPanel({ startParam, onExit }: Props) {
       return;
     }
     if (!dash.ok) {
-      setError(dash.error?.message || "Admin access required");
+      setError(dash.error?.message || t.accessRequired);
       if (dash.status === 403) setDenied(true);
       return;
     }
     setDenied(false);
     setDashboard(dash.data || {});
-    const [apps, profs, photoRows, matchRows, introRows, feedRows, noteRows, actionRows, blogRows, userRows, notesList] =
+    const [apps, profs, photoRows, matchRows, introRows, feedRows, noteRows, actionRows, blogRows, userRows, notesList, contentData] =
       await Promise.all([
-        workerRequest<{ items: Array<Record<string, string>> }>("/api/applications"),
+        workerRequest<{ items: Array<Record<string, string>> }>(`/api/applications?status=${appFilter}`),
         workerRequest<{ items: Array<Record<string, string>> }>("/api/admin/profiles"),
         workerRequest<{ items: Array<Record<string, unknown>> }>("/api/admin/photos"),
         workerRequest<{ items: Array<Record<string, unknown>> }>("/api/admin/matches"),
@@ -182,6 +202,7 @@ export function AdminPanel({ startParam, onExit }: Props) {
         workerRequest<{ items: Array<Record<string, string>> }>("/api/admin/blog"),
         workerRequest<{ items: Array<Record<string, string>> }>("/api/admin/users"),
         workerRequest<{ items: Array<Record<string, string>> }>("/api/admin/notes"),
+        workerRequest<{ items: Array<Record<string, string>> }>("/api/admin/content"),
       ]);
     if ([apps, profs, photoRows, matchRows].some((item) => item.status === 403)) {
       setDenied(true);
@@ -198,6 +219,7 @@ export function AdminPanel({ startParam, onExit }: Props) {
     setBlog(blogRows.data?.items || []);
     setUsers(userRows.data?.items || []);
     setAdminNotes(notesList.data?.items || []);
+    setContentRows(contentData.data?.items || []);
   }
 
   useEffect(() => {
@@ -212,6 +234,14 @@ export function AdminPanel({ startParam, onExit }: Props) {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    void workerRequest<{ items: Array<Record<string, string>> }>(`/api/applications?status=${appFilter}`).then(
+      (res) => {
+        if (res.ok) setApplications(res.data?.items || []);
+      }
+    );
+  }, [appFilter]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -257,9 +287,16 @@ export function AdminPanel({ startParam, onExit }: Props) {
     return true;
   }
 
+  useEffect(() => {
+    if (localeProp && localeProp !== locale) {
+      setLocale(localeProp);
+    }
+  }, [localeProp, locale]);
+
   async function saveLocale(next: AdminLocale) {
     setLocale(next);
     window.localStorage.setItem(STORAGE_KEY, next);
+    onLocaleChange?.(next);
     await workerRequest("/api/me", {
       method: "PATCH",
       body: JSON.stringify({ adminLocale: next }),
@@ -318,10 +355,10 @@ export function AdminPanel({ startParam, onExit }: Props) {
       {section === "dashboard" ? (
         <div className="grid grid-cols-2 gap-3">
           {[
-            [t.dash.waitingApplications, dashboard.pendingApplications, "applications"],
-            [t.dash.waitingPhotos, dashboard.pendingPhotos, "photos"],
+            [t.dash.newApplications, dashboard.pendingApplications, "applications"],
             [t.dash.profiles, dashboard.pendingProfiles || dashboard.profiles, "profiles"],
-            [t.dash.matches, dashboard.matches, "matches"],
+            [t.dash.photosWaiting, dashboard.pendingPhotos, "photos"],
+            [t.dash.blogDrafts, dashboard.blogDrafts, "blog"],
             [t.dash.notifications, dashboard.notifications, "notifications"],
           ].map(([label, value, target]) => (
             <button
@@ -339,6 +376,31 @@ export function AdminPanel({ startParam, onExit }: Props) {
 
       {section === "applications" && !selectedId ? (
         <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            {([
+              ["new", t.filters.pending],
+              ["info_requested", t.filters.needInfo],
+              ["approved", t.filters.approved],
+              ["rejected", t.filters.rejected],
+            ] as const).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                className={appFilter === id ? goldBtn : ghostBtn}
+                onClick={() => setAppFilter(id)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <p className="text-sm text-ivory/60">{t.infoHint}</p>
+          <textarea
+            className={`${field} py-3`}
+            rows={3}
+            value={infoDraft}
+            onChange={(e) => setInfoDraft(e.target.value)}
+            placeholder={t.infoPlaceholder}
+          />
           {applications.map((item) => (
             <article key={item.id} className="border border-white/10 p-4">
               <button type="button" className="w-full text-left" onClick={() => setSelectedId(item.id)}>
@@ -354,7 +416,19 @@ export function AdminPanel({ startParam, onExit }: Props) {
                 <button className={ghostBtn} disabled={busy} type="button" onClick={() => void act(`/api/applications/${item.id}/reject`, { method: "POST" })}>
                   {t.actions.reject}
                 </button>
-                <button className={ghostBtn} disabled={busy} type="button" onClick={() => void act(`/api/applications/${item.id}/request-info`, { method: "POST" })}>
+                <button
+                  className={ghostBtn}
+                  disabled={busy}
+                  type="button"
+                  onClick={() =>
+                    void act(`/api/applications/${item.id}/request-info`, {
+                      method: "POST",
+                      body: JSON.stringify({ message: infoDraft.trim() }),
+                    }).then((ok) => {
+                      if (ok) setInfoDraft("");
+                    })
+                  }
+                >
                   {t.actions.needInfo}
                 </button>
               </div>
@@ -373,6 +447,14 @@ export function AdminPanel({ startParam, onExit }: Props) {
           <p className="text-ivory/60">{application?.city}</p>
           <p className="text-sm text-ivory/80">{application?.message}</p>
           <p className="text-xs uppercase text-gold">{statusLabel(t, application?.status)}</p>
+          <p className="text-sm text-ivory/60">{t.infoHint}</p>
+          <textarea
+            className={`${field} py-3`}
+            rows={3}
+            value={infoDraft}
+            onChange={(e) => setInfoDraft(e.target.value)}
+            placeholder={t.infoPlaceholder}
+          />
           <div className="grid grid-cols-3 gap-2">
             <button className={goldBtn} disabled={busy} type="button" onClick={() => void act(`/api/applications/${selectedId}/approve`, { method: "POST" })}>
               {t.actions.approve}
@@ -380,8 +462,20 @@ export function AdminPanel({ startParam, onExit }: Props) {
             <button className={ghostBtn} disabled={busy} type="button" onClick={() => void act(`/api/applications/${selectedId}/reject`, { method: "POST" })}>
               {t.actions.reject}
             </button>
-            <button className={ghostBtn} disabled={busy} type="button" onClick={() => void act(`/api/applications/${selectedId}/request-info`, { method: "POST" })}>
-              {t.actions.needInfo}
+            <button
+              className={ghostBtn}
+              disabled={busy}
+              type="button"
+              onClick={() =>
+                void act(`/api/applications/${selectedId}/request-info`, {
+                  method: "POST",
+                  body: JSON.stringify({ message: infoDraft.trim() }),
+                }).then((ok) => {
+                  if (ok) setInfoDraft("");
+                })
+              }
+            >
+              {t.actions.sendInfo}
             </button>
           </div>
         </div>
@@ -640,31 +734,357 @@ export function AdminPanel({ startParam, onExit }: Props) {
       ) : null}
 
       {section === "blog" ? (
-        <div className="space-y-3">
-          {blog.map((item) => (
-            <article key={item.id} className="border border-white/10 p-4">
-              <p>{item.title || item.slug}</p>
-              <p className="text-xs uppercase text-gold">{statusLabel(t, item.status)}</p>
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                <button className={goldBtn} type="button" disabled={busy} onClick={() => void act(`/api/admin/blog/${item.id}/publish`, { method: "POST" })}>
-                  {t.actions.publish}
+        <div className="space-y-4">
+          {!blogForm ? (
+            <>
+              <button
+                className={goldBtn}
+                type="button"
+                onClick={() => {
+                  setBlogForm(true);
+                  setBlogEditId("");
+                  setBlogOriginal("");
+                  setBlogEn("");
+                  setBlogEs("");
+                  setBlogFile(null);
+                  setBlogPreview(false);
+                }}
+              >
+                + {t.blog.new}
+              </button>
+              {blog.map((item) => (
+                <article key={item.id} className="border border-white/10 p-4">
+                  <p>{item.title || item.slug}</p>
+                  <p className="text-xs uppercase text-gold">{statusLabel(t, item.status)}</p>
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <button
+                      className={ghostBtn}
+                      type="button"
+                      disabled={busy}
+                      onClick={async () => {
+                        const detail = await workerRequest<{
+                          article: Record<string, string>;
+                          translations: Array<{ locale: string; title: string; body: string }>;
+                        }>(`/api/admin/blog/${item.id}`);
+                        setBlogEditId(item.id);
+                        setBlogOriginal(detail.data?.article.original_text || "");
+                        const en = detail.data?.translations.find((row) => row.locale === "en");
+                        const es = detail.data?.translations.find((row) => row.locale === "es");
+                        setBlogEn(en ? `${en.title}\n${en.body}` : "");
+                        setBlogEs(es ? `${es.title}\n${es.body}` : "");
+                        setBlogFile(null);
+                        setBlogPreview(false);
+                        setBlogForm(true);
+                      }}
+                    >
+                      {t.blog.edit}
+                    </button>
+                    <button className={ghostBtn} type="button" disabled={busy} onClick={() => void act(`/api/admin/blog/${item.id}/publish`, { method: "POST" })}>
+                      {t.blog.publish}
+                    </button>
+                    <button className={ghostBtn} type="button" disabled={busy} onClick={() => void act(`/api/admin/blog/${item.id}/unpublish`, { method: "POST" })}>
+                      {t.blog.unpublish}
+                    </button>
+                    <button
+                      className={ghostBtn}
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        if (window.confirm(t.confirm.deletePost)) {
+                          void act(`/api/admin/blog/${item.id}/delete`, { method: "POST" });
+                        }
+                      }}
+                    >
+                      {t.blog.delete}
+                    </button>
+                  </div>
+                </article>
+              ))}
+              {!blog.length ? <p className="text-ivory/50">{t.blog.empty}</p> : null}
+            </>
+          ) : (
+            <div className="space-y-4">
+              <button className="min-h-11 text-xs uppercase text-ivory/50" type="button" onClick={() => setBlogForm(false)}>
+                {t.back}
+              </button>
+              {blogPreview ? (
+                <div className="space-y-3 border border-white/10 p-4">
+                  <p className="text-xs uppercase text-gold">{t.blog.preview}</p>
+                  {blogFile ? <p className="text-sm text-ivory/70">{blogFile.name}</p> : null}
+                  <p className="whitespace-pre-wrap text-sm">{blogEn || blogOriginal}</p>
+                  <p className="whitespace-pre-wrap text-sm text-ivory/70">{blogEs}</p>
+                </div>
+              ) : null}
+              <label className="block text-xs uppercase tracking-[0.14em] text-gold">{t.blog.photo}</label>
+              <input
+                className="text-sm"
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={(event) => setBlogFile(event.target.files?.[0] || null)}
+              />
+              <label className="block text-xs uppercase tracking-[0.14em] text-gold">{t.blog.original}</label>
+              <textarea className={`${field} py-3`} rows={5} value={blogOriginal} onChange={(e) => setBlogOriginal(e.target.value)} placeholder={t.blog.placeholderOriginal} />
+              <label className="block text-xs uppercase tracking-[0.14em] text-gold">{t.blog.english}</label>
+              <textarea className={`${field} py-3`} rows={5} value={blogEn} onChange={(e) => setBlogEn(e.target.value)} placeholder={t.blog.placeholderEn} />
+              <label className="block text-xs uppercase tracking-[0.14em] text-gold">{t.blog.spanish}</label>
+              <textarea className={`${field} py-3`} rows={5} value={blogEs} onChange={(e) => setBlogEs(e.target.value)} placeholder={t.blog.placeholderEs} />
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  className={ghostBtn}
+                  type="button"
+                  disabled={busy}
+                  onClick={async () => {
+                    if (!blogOriginal.trim() && !blogEn.trim()) {
+                      setError(t.blog.needText);
+                      return;
+                    }
+                    setBusy(true);
+                    let id = blogEditId;
+                    if (!id) {
+                      const created = await workerRequest<{ id: string }>("/api/admin/blog", {
+                        method: "POST",
+                        body: JSON.stringify({ originalText: blogOriginal, en: blogEn, es: blogEs }),
+                      });
+                      if (!created.ok || !created.data?.id) {
+                        setBusy(false);
+                        setError(created.error?.message || t.error);
+                        return;
+                      }
+                      id = created.data.id;
+                      setBlogEditId(id);
+                    } else {
+                      await workerRequest(`/api/admin/blog/${id}`, {
+                        method: "PATCH",
+                        body: JSON.stringify({ originalText: blogOriginal, en: blogEn, es: blogEs }),
+                      });
+                    }
+                    if (blogFile) {
+                      const form = new FormData();
+                      form.append("file", blogFile);
+                      await workerRequest(`/api/admin/blog/${id}/cover`, { method: "POST", body: form });
+                    }
+                    setBusy(false);
+                    await load();
+                    setError("");
+                  }}
+                >
+                  {t.blog.saveDraft}
                 </button>
-                <button className={ghostBtn} type="button" disabled={busy} onClick={() => void act(`/api/admin/blog/${item.id}/unpublish`, { method: "POST" })}>
-                  {t.actions.unpublish}
+                <button className={ghostBtn} type="button" onClick={() => setBlogPreview((value) => !value)}>
+                  {t.blog.preview}
                 </button>
-                <button className={ghostBtn} type="button" disabled={busy} onClick={() => void act(`/api/admin/blog/${item.id}/en`, { method: "POST" })}>
-                  EN
+                <button
+                  className={goldBtn}
+                  type="button"
+                  disabled={busy}
+                  onClick={async () => {
+                    if (!blogOriginal.trim() && !blogEn.trim()) {
+                      setError(t.blog.needText);
+                      return;
+                    }
+                    setBusy(true);
+                    let id = blogEditId;
+                    if (!id) {
+                      const created = await workerRequest<{ id: string }>("/api/admin/blog", {
+                        method: "POST",
+                        body: JSON.stringify({ originalText: blogOriginal, en: blogEn, es: blogEs, publish: false }),
+                      });
+                      if (!created.ok || !created.data?.id) {
+                        setBusy(false);
+                        setError(created.error?.message || t.error);
+                        return;
+                      }
+                      id = created.data.id;
+                    } else {
+                      await workerRequest(`/api/admin/blog/${id}`, {
+                        method: "PATCH",
+                        body: JSON.stringify({ originalText: blogOriginal, en: blogEn, es: blogEs }),
+                      });
+                    }
+                    if (blogFile) {
+                      const form = new FormData();
+                      form.append("file", blogFile);
+                      await workerRequest(`/api/admin/blog/${id}/cover`, { method: "POST", body: form });
+                    }
+                    await workerRequest(`/api/admin/blog/${id}/publish`, { method: "POST" });
+                    setBusy(false);
+                    setBlogForm(false);
+                    await load();
+                  }}
+                >
+                  {t.blog.publish}
                 </button>
-                <button className={ghostBtn} type="button" disabled={busy} onClick={() => void act(`/api/admin/blog/${item.id}/es`, { method: "POST" })}>
-                  ES
-                </button>
-                <button className={ghostBtn} type="button" disabled={busy} onClick={() => void act(`/api/admin/blog/${item.id}/delete`, { method: "POST" })}>
-                  {t.actions.delete}
+                <button className={ghostBtn} type="button" onClick={() => setBlogForm(false)}>
+                  {t.blog.cancel}
                 </button>
               </div>
-            </article>
-          ))}
-          {!blog.length ? <p className="text-ivory/50">{t.empty.blog}</p> : null}
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {section === "content" ? (
+        <div className="space-y-4">
+          <p className="text-xs uppercase tracking-[0.14em] text-gold">{t.content.title}</p>
+          <div className="grid grid-cols-1 gap-2">
+            {contentPages.map((page) => (
+              <button
+                key={page.id}
+                type="button"
+                className={`${contentPage === page.id ? goldBtn : ghostBtn}`}
+                onClick={() => {
+                  setContentPage(page.id);
+                  setContentFieldId("");
+                  setContentPreview(false);
+                }}
+              >
+                {page.label[locale]}
+              </button>
+            ))}
+          </div>
+          {contentPage ? (
+            <div className="space-y-3">
+              {contentFields
+                .filter((field) => field.page === contentPage)
+                .map((field) => {
+                  const row = contentRows.find(
+                    (item) => item.field === field.field && item.page === field.page && item.locale === contentLocale && item.section === field.section
+                  );
+                  const live = row?.draft_value || row?.published_value || defaultContentValue(field.dictPath, contentLocale);
+                  return (
+                    <article key={field.id} className="border border-white/10 p-4">
+                      <p className="text-sm">{field.label[locale]}</p>
+                      <p className="mt-1 text-xs text-ivory/60">{live.slice(0, 160)}</p>
+                      <div className="mt-2 grid grid-cols-2 gap-2">
+                        <button
+                          className={ghostBtn}
+                          type="button"
+                          onClick={() => {
+                            setContentFieldId(field.id);
+                            setContentDraft(row?.draft_value || live);
+                            setContentPreview(false);
+                          }}
+                        >
+                          {t.content.edit}
+                        </button>
+                        <button
+                          className={goldBtn}
+                          type="button"
+                          disabled={busy}
+                          onClick={() => {
+                            if (window.confirm(t.confirm.publishContent)) {
+                              void act("/api/admin/content", {
+                                method: "PATCH",
+                                body: JSON.stringify({
+                                  fieldId: field.id,
+                                  locale: contentLocale,
+                                  draftValue: row?.draft_value || live,
+                                  action: "publish",
+                                }),
+                              });
+                            }
+                          }}
+                        >
+                          {t.content.publish}
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
+              <div className="grid grid-cols-2 gap-2">
+                <button className={`${contentLocale === "en" ? goldBtn : ghostBtn}`} type="button" onClick={() => setContentLocale("en")}>
+                  {t.content.english}
+                </button>
+                <button className={`${contentLocale === "es" ? goldBtn : ghostBtn}`} type="button" onClick={() => setContentLocale("es")}>
+                  {t.content.spanish}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-ivory/50">{t.content.pickPage}</p>
+          )}
+          {contentFieldId ? (
+            <div className="space-y-3 border border-white/10 p-4">
+              {(() => {
+                const selected = contentFields.find((item) => item.id === contentFieldId) as ContentField | undefined;
+                const row = contentRows.find(
+                  (item) =>
+                    selected &&
+                    item.field === selected.field &&
+                    item.page === selected.page &&
+                    item.locale === contentLocale &&
+                    item.section === selected.section
+                );
+                const oldValue = row?.published_value || defaultContentValue(selected?.dictPath || "", contentLocale);
+                return (
+                  <>
+                    <p className="text-sm">{selected?.label[locale]}</p>
+                    {contentPreview ? (
+                      <div className="space-y-2 text-sm">
+                        <p className="text-gold">{t.content.old}</p>
+                        <p className="text-ivory/70">{oldValue}</p>
+                        <p className="text-gold">{t.content.next}</p>
+                        <p>{contentDraft}</p>
+                      </div>
+                    ) : null}
+                    <textarea
+                      className={`${field} py-3`}
+                      rows={4}
+                      value={contentDraft}
+                      onChange={(e) => setContentDraft(e.target.value)}
+                      placeholder={t.content.placeholder}
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        className={ghostBtn}
+                        type="button"
+                        disabled={busy}
+                        onClick={() =>
+                          void act("/api/admin/content", {
+                            method: "PATCH",
+                            body: JSON.stringify({
+                              fieldId: contentFieldId,
+                              locale: contentLocale,
+                              draftValue: contentDraft,
+                              action: "save",
+                            }),
+                          })
+                        }
+                      >
+                        {t.content.save}
+                      </button>
+                      <button className={ghostBtn} type="button" onClick={() => setContentPreview((value) => !value)}>
+                        {t.content.preview}
+                      </button>
+                      <button
+                        className={goldBtn}
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                          if (window.confirm(t.confirm.publishContent)) {
+                            void act("/api/admin/content", {
+                              method: "PATCH",
+                              body: JSON.stringify({
+                                fieldId: contentFieldId,
+                                locale: contentLocale,
+                                draftValue: contentDraft,
+                                action: "publish",
+                              }),
+                            });
+                          }
+                        }}
+                      >
+                        {t.content.publish}
+                      </button>
+                      <button className={ghostBtn} type="button" onClick={() => setContentFieldId("")}>
+                        {t.content.cancel}
+                      </button>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          ) : null}
         </div>
       ) : null}
 

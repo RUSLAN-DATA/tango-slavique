@@ -94,12 +94,12 @@ export function BlogIndex() {
       {articles.map((article) => {
         const inner = (
           <>
-            <div className="aspect-[16/10] overflow-hidden">
+            <div className="aspect-[16/10] overflow-hidden bg-zinc-100">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={article.image}
                 alt=""
-                className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
+                className="h-full w-full object-contain"
               />
             </div>
             <div className="space-y-3 bg-white p-6 text-zinc-900 sm:p-8">

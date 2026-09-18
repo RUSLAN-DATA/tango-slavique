@@ -165,7 +165,8 @@ export async function updateApplicationStatus(
   env: Env,
   id: string,
   status: ApplicationStatus,
-  adminTelegramId: string
+  adminTelegramId: string,
+  infoMessage?: string
 ): Promise<ApplicationRow | null> {
   const now = nowIso();
   await env.DB.prepare(
@@ -187,7 +188,10 @@ export async function updateApplicationStatus(
         : status === "rejected"
           ? "application_rejected"
           : "application_info_requested";
-    await notifyUser(env, updated.user_id, type, { applicationId: id });
+    await notifyUser(env, updated.user_id, type, {
+      applicationId: id,
+      message: infoMessage || "",
+    });
     if (status === "approved") {
       await notifyUser(env, updated.user_id, "profile_approved", { applicationId: id });
     }

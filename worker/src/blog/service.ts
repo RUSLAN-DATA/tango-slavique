@@ -12,7 +12,9 @@ export type BlogArticle = {
   tags: string | null;
   cover_r2_key: string | null;
   published_at: string | null;
+  original_text: string | null;
   created_at: string;
+  created_by?: string | null;
 };
 
 export type BlogTranslation = {
@@ -37,15 +39,63 @@ function blogKeyboard(id: string) {
   return {
     inline_keyboard: [
       [
-        { text: "👀 Preview", callback_data: `b:v:${id}` },
-        { text: "🌐 Publish", callback_data: `b:p:${id}` },
+        { text: "✏️ Edit", callback_data: `b:e:${id}` },
+        { text: "👁 Preview", callback_data: `b:v:${id}` },
       ],
       [
-        { text: "✏️ Edit", callback_data: `b:e:${id}` },
+        { text: "🚀 Publish", callback_data: `b:p:${id}` },
         { text: "❌ Cancel", callback_data: `b:c:${id}` },
       ],
     ],
   };
+}
+
+export function blogListKeyboard(id: string, status: string) {
+  const second =
+    status === "published"
+      ? { text: "⏸ Unpublish", callback_data: `b:u:${id}` }
+      : { text: "🚀 Publish", callback_data: `b:p:${id}` };
+  return {
+    inline_keyboard: [
+      [
+        { text: "✏️ Edit", callback_data: `b:e:${id}` },
+        { text: "👁 Preview", callback_data: `b:v:${id}` },
+      ],
+      [second, { text: "🗑 Delete", callback_data: `b:d:${id}` }],
+    ],
+  };
+}
+
+export function blogEditKeyboard(id: string) {
+  return {
+    inline_keyboard: [
+      [
+        { text: "🇬🇧 English", callback_data: `b:en:${id}` },
+        { text: "🇪🇸 Spanish", callback_data: `b:es:${id}` },
+      ],
+      [
+        { text: "📝 Original", callback_data: `b:or:${id}` },
+        { text: "🖼 Photo", callback_data: `b:ph:${id}` },
+      ],
+      [{ text: "↩️ Back", callback_data: `b:v:${id}` }],
+    ],
+  };
+}
+
+export async function createPhotoDraft(
+  env: Env,
+  input: { coverKey: string; createdBy?: string | null }
+): Promise<BlogArticle> {
+  const now = nowIso();
+  const id = newId();
+  const slug = slugify("draft");
+  await env.DB.prepare(
+    `INSERT INTO blog_articles (id, slug, status, category, tags, cover_r2_key, published_at, created_by, created_at, updated_at, original_text)
+     VALUES (?, ?, 'draft', 'journal', NULL, ?, NULL, ?, ?, ?, NULL)`
+  )
+    .bind(id, slug, input.coverKey, input.createdBy || null, now, now)
+    .run();
+  return (await getArticle(env, id))!;
 }
 
 export async function createBlogDraft(
@@ -55,6 +105,8 @@ export async function createBlogDraft(
     coverKey?: string | null;
     createdBy?: string | null;
     locale?: SiteLocale | "unknown";
+    silent?: boolean;
+    skipTranslate?: boolean;
   }
 ): Promise<BlogArticle> {
   const now = nowIso();
@@ -67,10 +119,10 @@ export async function createBlogDraft(
   const slug = slugify(title);
 
   await env.DB.prepare(
-    `INSERT INTO blog_articles (id, slug, status, category, tags, cover_r2_key, published_at, created_by, created_at, updated_at)
-     VALUES (?, ?, 'draft', 'journal', NULL, ?, NULL, ?, ?, ?)`
+    `INSERT INTO blog_articles (id, slug, status, category, tags, cover_r2_key, published_at, created_by, created_at, updated_at, original_text)
+     VALUES (?, ?, 'draft', 'journal', NULL, ?, NULL, ?, ?, ?, ?)`
   )
-    .bind(id, slug, input.coverKey || null, input.createdBy || null, now, now)
+    .bind(id, slug, input.coverKey || null, input.createdBy || null, now, now, input.text.slice(0, 20000))
     .run();
 
   await env.DB.prepare(
@@ -91,8 +143,13 @@ export async function createBlogDraft(
     .run();
 
   const article = (await getArticle(env, id))!;
-  await generateBlogLocale(env, id, "en").catch(() => undefined);
-  await generateBlogLocale(env, id, "es").catch(() => undefined);
+  if (!input.skipTranslate) {
+    await generateBlogLocale(env, id, "en").catch(() => undefined);
+    await generateBlogLocale(env, id, "es").catch(() => undefined);
+  }
+  if (input.silent) {
+    return article;
+  }
   const bundle = await articleWithTranslations(env, id);
   const en = bundle?.translations.find((row) => row.locale === "en");
   const es = bundle?.translations.find((row) => row.locale === "es");
@@ -117,6 +174,81 @@ export async function getArticle(env: Env, idOrSlug: string): Promise<BlogArticl
     .first<BlogArticle>();
 }
 
+export async function attachBlogText(
+  env: Env,
+  articleId: string,
+  text: string
+): Promise<BlogArticle | null> {
+  const article = await getArticle(env, articleId);
+  if (!article) {
+    return null;
+  }
+  const now = nowIso();
+  const lines = text.trim().split(/\n+/);
+  const title = (lines[0] || "Untitled").slice(0, 160);
+  const body = (lines.length > 1 ? lines.slice(1).join("\n\n") : text).slice(0, 20000);
+  const locale = detectLocale(text);
+  const resolved: SiteLocale = locale === "unknown" ? "en" : locale;
+  await env.DB.prepare(
+    "UPDATE blog_articles SET original_text = ?, slug = ?, updated_at = ? WHERE id = ?"
+  )
+    .bind(text.slice(0, 20000), slugify(title), now, articleId)
+    .run();
+  await env.DB.prepare("DELETE FROM blog_translations WHERE article_id = ?")
+    .bind(articleId)
+    .run();
+  await env.DB.prepare(
+    `INSERT INTO blog_translations (id, article_id, locale, title, body, seo_title, seo_description, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(newId(), articleId, resolved, title, body, title.slice(0, 70), body.replace(/\s+/g, " ").slice(0, 160), now, now)
+    .run();
+  await generateBlogLocale(env, articleId, "en").catch(() => undefined);
+  await generateBlogLocale(env, articleId, "es").catch(() => undefined);
+  return getArticle(env, articleId);
+}
+
+export async function updateBlogTranslation(
+  env: Env,
+  articleId: string,
+  locale: SiteLocale,
+  text: string
+): Promise<boolean> {
+  const lines = text.trim().split(/\n+/);
+  const title = (lines[0] || "Untitled").slice(0, 160);
+  const body = (lines.length > 1 ? lines.slice(1).join("\n\n") : text).slice(0, 20000);
+  const now = nowIso();
+  const existing = await env.DB.prepare(
+    "SELECT id FROM blog_translations WHERE article_id = ? AND locale = ?"
+  )
+    .bind(articleId, locale)
+    .first();
+  if (existing) {
+    await env.DB.prepare(
+      "UPDATE blog_translations SET title=?, body=?, seo_title=?, seo_description=?, updated_at=? WHERE article_id=? AND locale=?"
+    )
+      .bind(title, body, title.slice(0, 70), body.replace(/\s+/g, " ").slice(0, 160), now, articleId, locale)
+      .run();
+  } else {
+    await env.DB.prepare(
+      `INSERT INTO blog_translations (id, article_id, locale, title, body, seo_title, seo_description, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+      .bind(newId(), articleId, locale, title, body, title.slice(0, 70), body.replace(/\s+/g, " ").slice(0, 160), now, now)
+      .run();
+  }
+  await env.DB.prepare("UPDATE blog_articles SET updated_at = ? WHERE id = ?")
+    .bind(now, articleId)
+    .run();
+  return true;
+}
+
+export async function replaceBlogCover(env: Env, articleId: string, coverKey: string): Promise<void> {
+  await env.DB.prepare("UPDATE blog_articles SET cover_r2_key = ?, updated_at = ? WHERE id = ?")
+    .bind(coverKey, nowIso(), articleId)
+    .run();
+}
+
 export async function listPublishedBlog(env: Env, locale: SiteLocale) {
   const rows = await env.DB.prepare(
     `SELECT a.id, a.slug, a.status, a.category, a.cover_r2_key, a.published_at, a.created_at,
@@ -134,11 +266,15 @@ export async function listPublishedBlog(env: Env, locale: SiteLocale) {
 
 export async function listBlogDrafts(env: Env) {
   const rows = await env.DB.prepare(
-    `SELECT a.*, t.title, t.locale
+    `SELECT a.id, a.slug, a.status, a.category, a.cover_r2_key, a.published_at, a.created_at, a.updated_at, a.original_text,
+            COALESCE(
+              (SELECT t.title FROM blog_translations t WHERE t.article_id = a.id AND t.locale = 'en' LIMIT 1),
+              (SELECT t.title FROM blog_translations t WHERE t.article_id = a.id LIMIT 1)
+            ) as title
      FROM blog_articles a
-     LEFT JOIN blog_translations t ON t.article_id = a.id
+     WHERE IFNULL(a.status, 'draft') != 'archived'
      ORDER BY a.updated_at DESC
-     LIMIT 40`
+     LIMIT 100`
   ).all();
   return rows.results || [];
 }
@@ -159,7 +295,8 @@ export async function articleWithTranslations(env: Env, idOrSlug: string) {
 export async function generateBlogLocale(
   env: Env,
   articleId: string,
-  target: SiteLocale
+  target: SiteLocale,
+  force = false
 ): Promise<boolean> {
   const bundle = await articleWithTranslations(env, articleId);
   if (!bundle) {
@@ -170,7 +307,7 @@ export async function generateBlogLocale(
     return false;
   }
   const existing = bundle.translations.find((row) => row.locale === target);
-  if (existing?.title && existing.body && existing.body.length > 40) {
+  if (!force && existing?.title && existing.body && existing.body.length > 40) {
     return true;
   }
 
@@ -232,13 +369,22 @@ export async function publishArticle(env: Env, id: string): Promise<BlogArticle 
   )
     .bind(now, now, id)
     .run();
-  return getArticle(env, id);
+  const published = await getArticle(env, id);
+  const title =
+    bundle.translations.find((row) => row.locale === "en")?.title ||
+    bundle.translations[0]?.title ||
+    "Blog";
+  await sendAdminMessage(
+    env,
+    ["🌐 Blog published", title, published?.published_at || now, "EN + ES · public"].join("\n")
+  ).catch(() => false);
+  return published;
 }
 
 export async function unpublishArticle(env: Env, id: string): Promise<BlogArticle | null> {
   const now = nowIso();
   await env.DB.prepare(
-    "UPDATE blog_articles SET status = 'draft', published_at = NULL, updated_at = ? WHERE id = ?"
+    "UPDATE blog_articles SET status = 'unpublished', updated_at = ? WHERE id = ?"
   )
     .bind(now, id)
     .run();
@@ -250,14 +396,45 @@ export async function deleteArticle(env: Env, id: string): Promise<boolean> {
   if (!article) {
     return false;
   }
-  if (article.cover_r2_key) {
-    await env.PHOTOS.delete(article.cover_r2_key).catch(() => undefined);
-  }
-  await env.DB.prepare("DELETE FROM blog_translations WHERE article_id = ?")
-    .bind(id)
+  await env.DB.prepare(
+    "UPDATE blog_articles SET status = 'archived', archived_at = ?, updated_at = ? WHERE id = ?"
+  )
+    .bind(nowIso(), nowIso(), id)
     .run();
-  await env.DB.prepare("DELETE FROM blog_articles WHERE id = ?").bind(id).run();
   return true;
+}
+
+export async function saveBlogFromAdmin(
+  env: Env,
+  articleId: string,
+  input: {
+    originalText?: string;
+    en?: string;
+    es?: string;
+  }
+): Promise<BlogArticle | null> {
+  const article = await getArticle(env, articleId);
+  if (!article) {
+    return null;
+  }
+  if (input.originalText && input.originalText.trim()) {
+    if (input.en || input.es) {
+      await env.DB.prepare(
+        "UPDATE blog_articles SET original_text = ?, updated_at = ? WHERE id = ?"
+      )
+        .bind(input.originalText.slice(0, 20000), nowIso(), articleId)
+        .run();
+    } else {
+      await attachBlogText(env, articleId, input.originalText);
+    }
+  }
+  if (input.en && input.en.trim()) {
+    await updateBlogTranslation(env, articleId, "en", input.en);
+  }
+  if (input.es && input.es.trim()) {
+    await updateBlogTranslation(env, articleId, "es", input.es);
+  }
+  return getArticle(env, articleId);
 }
 
 export function publicBlogView(

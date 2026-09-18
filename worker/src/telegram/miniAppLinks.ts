@@ -79,7 +79,12 @@ export const ADMIN_HUB_TEXT = [
   "📋 TANGO SLAVIQUE ADMIN",
   "",
   "🛠 Admin Panel",
-  "Open the full Admin Mini App. Every authorized administrator has the same access.",
+  "📋 Applications",
+  "👤 Profiles",
+  "📝 Blog",
+  "🌐 Website Content",
+  "🔔 Notifications",
+  "⚙️ Settings",
 ].join("\n");
 
 export function isAdminPanelCommand(text: string): boolean {

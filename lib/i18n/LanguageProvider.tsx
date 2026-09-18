@@ -9,6 +9,8 @@ import {
   type ReactNode,
 } from "react";
 import { dictionaries, type Dictionary, type Locale } from "@/lib/i18n/dictionary";
+import { applyContentOverrides } from "@/lib/content/overlay";
+import { WORKER_URL } from "@/lib/miniapp/api";
 
 const STORAGE_KEY = "tango-slavique-locale";
 
@@ -42,6 +44,7 @@ function detectLocale(): Locale {
 export function LanguageProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>("en");
   const [hydrated, setHydrated] = useState(false);
+  const [overrides, setOverrides] = useState<Record<string, string>>({});
 
   useEffect(() => {
     setLocaleState(detectLocale());
@@ -58,13 +61,37 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     window.localStorage.setItem(STORAGE_KEY, locale);
   }, [hydrated, locale]);
 
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const response = await fetch(`${WORKER_URL}/api/public/content?locale=${locale}`);
+        const payload = (await response.json()) as {
+          ok?: boolean;
+          data?: { overrides?: Record<string, string> };
+        };
+        if (!cancelled && payload.ok && payload.data?.overrides) {
+          setOverrides(payload.data.overrides);
+        }
+      } catch {
+        if (!cancelled) {
+          setOverrides({});
+        }
+      }
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [locale]);
+
   const value = useMemo<LanguageContextValue>(
     () => ({
       locale,
       setLocale: (next) => setLocaleState(next),
-      t: dictionaries[locale] as Dictionary,
+      t: applyContentOverrides(dictionaries[locale], overrides) as Dictionary,
     }),
-    [locale]
+    [locale, overrides]
   );
 
   return (
