@@ -1,5 +1,6 @@
 import type { Env } from "../env";
 import { newId, nowIso } from "../crypto";
+import { notifyUser } from "../notifications/service";
 import { calculateMatchScore, type MatchPreferences, type MatchProfile } from "./score";
 
 type ProfileJoin = {
@@ -109,7 +110,11 @@ export async function runMatchingForAll(
   const rows = people.results || [];
   let created = 0;
   for (const row of rows) {
-    created += await runMatchingForUser(env, row.user_id);
+    const createdForUser = await runMatchingForUser(env, row.user_id);
+    if (createdForUser > 0) {
+      await notifyUser(env, row.user_id, "match_new", { created: createdForUser });
+    }
+    created += createdForUser;
   }
   return { created, users: rows.length };
 }

@@ -3,6 +3,13 @@
 import { FormEvent, useEffect, useState } from "react";
 import { getSessionToken, workerRequest, WORKER_URL } from "@/lib/miniapp/api";
 import { parseMiniAppStartParam } from "@/lib/miniapp/startParam";
+import {
+  adminCopy,
+  adminLocales,
+  isAdminLocale,
+  statusLabel,
+  type AdminLocale,
+} from "@/lib/miniapp/adminCopy";
 
 type Section =
   | "dashboard"
@@ -10,11 +17,13 @@ type Section =
   | "profiles"
   | "photos"
   | "matches"
+  | "blog"
+  | "notifications"
+  | "notes"
+  | "settings"
   | "introductions"
   | "feedback"
-  | "notifications"
   | "history"
-  | "blog"
   | "users";
 
 type Props = {
@@ -22,10 +31,18 @@ type Props = {
   onExit?: () => void;
 };
 
+const STORAGE_KEY = "ts_admin_locale";
+
+function readStoredLocale(): AdminLocale {
+  if (typeof window === "undefined") return "en";
+  const stored = window.localStorage.getItem(STORAGE_KEY);
+  return isAdminLocale(stored) ? stored : "en";
+}
+
 const goldBtn =
-  "min-h-11 bg-gold px-4 text-xs uppercase tracking-[0.12em] text-black disabled:opacity-50";
+  "min-h-12 bg-gold px-4 text-xs uppercase tracking-[0.12em] text-black disabled:opacity-50";
 const ghostBtn =
-  "min-h-11 border border-white/15 px-4 text-xs uppercase tracking-[0.12em] text-ivory disabled:opacity-50";
+  "min-h-12 border border-white/15 px-4 text-xs uppercase tracking-[0.12em] text-ivory disabled:opacity-50";
 const field =
   "min-h-11 w-full border border-white/[0.08] bg-white/[0.03] px-3 text-base text-ivory outline-none";
 
@@ -54,22 +71,47 @@ function PhotoThumb({ id, large }: { id: string; large?: boolean }) {
   );
 }
 
-const sections: { id: Section; label: string }[] = [
-  { id: "dashboard", label: "Dashboard" },
-  { id: "applications", label: "Applications" },
-  { id: "profiles", label: "Profiles" },
-  { id: "photos", label: "Photos" },
-  { id: "matches", label: "Matches" },
-  { id: "introductions", label: "Introductions" },
-  { id: "feedback", label: "Feedback" },
-  { id: "notifications", label: "Alerts" },
-  { id: "history", label: "History" },
-  { id: "blog", label: "Blog" },
-  { id: "users", label: "Users" },
+function AnnotationThumb({ id }: { id: string }) {
+  const [src, setSrc] = useState("");
+  useEffect(() => {
+    let objectUrl = "";
+    async function load() {
+      const token = getSessionToken();
+      const response = await fetch(`${WORKER_URL}/api/admin/photos/${id}/annotation`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!response.ok) return;
+      objectUrl = URL.createObjectURL(await response.blob());
+      setSrc(objectUrl);
+    }
+    void load();
+    return () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [id]);
+  if (!src) return null;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={src} alt="" className="mt-2 h-32 w-full object-contain bg-white/5" />
+  );
+}
+
+const primaryNav: Section[] = [
+  "dashboard",
+  "applications",
+  "profiles",
+  "photos",
+  "matches",
+  "blog",
+  "notifications",
+  "notes",
+  "settings",
 ];
 
 export function AdminPanel({ startParam, onExit }: Props) {
   const parsed = parseMiniAppStartParam(startParam);
+  const [locale, setLocale] = useState<AdminLocale>("en");
+  const t = adminCopy[locale];
   const [section, setSection] = useState<Section>((parsed?.section as Section) || "dashboard");
   const [selectedId, setSelectedId] = useState(parsed?.id || "");
   const [denied, setDenied] = useState(false);
@@ -96,6 +138,7 @@ export function AdminPanel({ startParam, onExit }: Props) {
         face_visible?: boolean;
         main_person_detected?: boolean;
         admin_override?: string | null;
+        has_annotation?: boolean;
       } | null;
     }>
   >([]);
@@ -107,6 +150,7 @@ export function AdminPanel({ startParam, onExit }: Props) {
   const [history, setHistory] = useState<Array<Record<string, string>>>([]);
   const [blog, setBlog] = useState<Array<Record<string, string>>>([]);
   const [users, setUsers] = useState<Array<Record<string, string>>>([]);
+  const [adminNotes, setAdminNotes] = useState<Array<Record<string, string>>>([]);
   const [note, setNote] = useState("");
   const [editName, setEditName] = useState("");
   const [editCity, setEditCity] = useState("");
@@ -125,7 +169,7 @@ export function AdminPanel({ startParam, onExit }: Props) {
     }
     setDenied(false);
     setDashboard(dash.data || {});
-    const [apps, profs, photoRows, matchRows, introRows, feedRows, noteRows, actionRows, blogRows, userRows] =
+    const [apps, profs, photoRows, matchRows, introRows, feedRows, noteRows, actionRows, blogRows, userRows, notesList] =
       await Promise.all([
         workerRequest<{ items: Array<Record<string, string>> }>("/api/applications"),
         workerRequest<{ items: Array<Record<string, string>> }>("/api/admin/profiles"),
@@ -137,6 +181,7 @@ export function AdminPanel({ startParam, onExit }: Props) {
         workerRequest<{ items: Array<Record<string, string>> }>("/api/admin/actions"),
         workerRequest<{ items: Array<Record<string, string>> }>("/api/admin/blog"),
         workerRequest<{ items: Array<Record<string, string>> }>("/api/admin/users"),
+        workerRequest<{ items: Array<Record<string, string>> }>("/api/admin/notes"),
       ]);
     if ([apps, profs, photoRows, matchRows].some((item) => item.status === 403)) {
       setDenied(true);
@@ -152,9 +197,18 @@ export function AdminPanel({ startParam, onExit }: Props) {
     setHistory(actionRows.data?.items || []);
     setBlog(blogRows.data?.items || []);
     setUsers(userRows.data?.items || []);
+    setAdminNotes(notesList.data?.items || []);
   }
 
   useEffect(() => {
+    const stored = readStoredLocale();
+    setLocale(stored);
+    void workerRequest<{ adminLocale?: string }>("/api/me").then((res) => {
+      if (res.ok && isAdminLocale(res.data?.adminLocale)) {
+        setLocale(res.data.adminLocale);
+        window.localStorage.setItem(STORAGE_KEY, res.data.adminLocale);
+      }
+    });
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -194,7 +248,7 @@ export function AdminPanel({ startParam, onExit }: Props) {
     const result = await workerRequest(path, init);
     setBusy(false);
     if (!result.ok) {
-      setError(result.status === 403 ? "Admin access required" : result.error?.message || "Could not save");
+      setError(result.status === 403 ? t.accessRequired : result.error?.message || t.error);
       if (result.status === 403) setDenied(true);
       return false;
     }
@@ -203,13 +257,28 @@ export function AdminPanel({ startParam, onExit }: Props) {
     return true;
   }
 
+  async function saveLocale(next: AdminLocale) {
+    setLocale(next);
+    window.localStorage.setItem(STORAGE_KEY, next);
+    await workerRequest("/api/me", {
+      method: "PATCH",
+      body: JSON.stringify({ adminLocale: next }),
+    });
+  }
+
+  function navLabel(id: Section) {
+    if (id in t.nav) return t.nav[id as keyof typeof t.nav];
+    if (id in t.extra) return t.extra[id as keyof typeof t.extra];
+    return id;
+  }
+
   if (denied) {
     return (
       <div className="px-5 py-16 text-center text-ivory/70">
-        <p>Admin access is only available to authorized administrators.</p>
+        <p>{t.denied}</p>
         {onExit ? (
           <button className={`${ghostBtn} mt-6`} type="button" onClick={onExit}>
-            Back
+            {t.back}
           </button>
         ) : null}
       </div>
@@ -219,29 +288,29 @@ export function AdminPanel({ startParam, onExit }: Props) {
   return (
     <div className="space-y-5 pb-8">
       <header>
-        <p className="text-[10px] uppercase tracking-[0.2em] text-gold">Tango Slavique Admin</p>
-        <h1 className="mt-1 font-display text-3xl text-ivory">Admin Panel</h1>
+        <p className="text-[10px] uppercase tracking-[0.2em] text-gold">{t.house}</p>
+        <h1 className="mt-1 font-display text-3xl text-ivory">{t.title}</h1>
         {onExit ? (
-          <button className="mt-2 text-xs uppercase tracking-[0.14em] text-ivory/50" type="button" onClick={onExit}>
-            My profile
+          <button className="mt-2 min-h-11 text-xs uppercase tracking-[0.14em] text-ivory/50" type="button" onClick={onExit}>
+            {t.myProfile}
           </button>
         ) : null}
         {error ? <p className="mt-2 text-sm text-red-300">{error}</p> : null}
       </header>
       <nav className="flex flex-wrap gap-2">
-        {sections.map((item) => (
+        {primaryNav.map((item) => (
           <button
-            key={item.id}
+            key={item}
             type="button"
-            className={`min-h-10 px-3 text-[10px] uppercase tracking-[0.12em] ${
-              section === item.id ? "bg-gold text-black" : "border border-white/10 text-ivory/70"
+            className={`min-h-11 px-3 text-[10px] uppercase tracking-[0.12em] ${
+              section === item ? "bg-gold text-black" : "border border-white/10 text-ivory/70"
             }`}
             onClick={() => {
-              setSection(item.id);
-              if (item.id !== section) setSelectedId("");
+              setSection(item);
+              if (item !== section) setSelectedId("");
             }}
           >
-            {item.label}
+            {navLabel(item)}
           </button>
         ))}
       </nav>
@@ -249,14 +318,11 @@ export function AdminPanel({ startParam, onExit }: Props) {
       {section === "dashboard" ? (
         <div className="grid grid-cols-2 gap-3">
           {[
-            ["Applications", dashboard.applications, "applications"],
-            ["Needs review", dashboard.pendingApplications, "applications"],
-            ["Profiles", dashboard.profiles, "profiles"],
-            ["Pending photos", dashboard.pendingPhotos, "photos"],
-            ["Matches", dashboard.matches, "matches"],
-            ["Introductions", dashboard.introductions, "introductions"],
-            ["Feedback", dashboard.feedback, "feedback"],
-            ["Users", dashboard.users, "users"],
+            [t.dash.waitingApplications, dashboard.pendingApplications, "applications"],
+            [t.dash.waitingPhotos, dashboard.pendingPhotos, "photos"],
+            [t.dash.profiles, dashboard.pendingProfiles || dashboard.profiles, "profiles"],
+            [t.dash.matches, dashboard.matches, "matches"],
+            [t.dash.notifications, dashboard.notifications, "notifications"],
           ].map(([label, value, target]) => (
             <button
               key={String(label)}
@@ -278,44 +344,44 @@ export function AdminPanel({ startParam, onExit }: Props) {
               <button type="button" className="w-full text-left" onClick={() => setSelectedId(item.id)}>
                 <p className="font-display text-2xl">{item.name || item.id}</p>
                 <p className="text-sm text-ivory/60">
-                  {item.city} · {item.status}
+                  {item.city} · {statusLabel(t, item.status)}
                 </p>
               </button>
               <div className="mt-3 grid grid-cols-3 gap-2">
                 <button className={goldBtn} disabled={busy} type="button" onClick={() => void act(`/api/applications/${item.id}/approve`, { method: "POST" })}>
-                  Approve
+                  {t.actions.approve}
                 </button>
                 <button className={ghostBtn} disabled={busy} type="button" onClick={() => void act(`/api/applications/${item.id}/reject`, { method: "POST" })}>
-                  Reject
+                  {t.actions.reject}
                 </button>
                 <button className={ghostBtn} disabled={busy} type="button" onClick={() => void act(`/api/applications/${item.id}/request-info`, { method: "POST" })}>
-                  Need info
+                  {t.actions.needInfo}
                 </button>
               </div>
             </article>
           ))}
-          {!applications.length ? <p className="text-ivory/50">No applications yet.</p> : null}
+          {!applications.length ? <p className="text-ivory/50">{t.empty.applications}</p> : null}
         </div>
       ) : null}
 
       {section === "applications" && selectedId ? (
         <div className="space-y-4">
-          <button className="text-xs uppercase text-ivory/50" type="button" onClick={() => setSelectedId("")}>
-            Back
+          <button className="min-h-11 text-xs uppercase text-ivory/50" type="button" onClick={() => setSelectedId("")}>
+            {t.back}
           </button>
           <p className="font-display text-3xl">{application?.name || selectedId}</p>
           <p className="text-ivory/60">{application?.city}</p>
           <p className="text-sm text-ivory/80">{application?.message}</p>
-          <p className="text-xs uppercase text-gold">{application?.status}</p>
+          <p className="text-xs uppercase text-gold">{statusLabel(t, application?.status)}</p>
           <div className="grid grid-cols-3 gap-2">
             <button className={goldBtn} disabled={busy} type="button" onClick={() => void act(`/api/applications/${selectedId}/approve`, { method: "POST" })}>
-              Approve
+              {t.actions.approve}
             </button>
             <button className={ghostBtn} disabled={busy} type="button" onClick={() => void act(`/api/applications/${selectedId}/reject`, { method: "POST" })}>
-              Reject
+              {t.actions.reject}
             </button>
             <button className={ghostBtn} disabled={busy} type="button" onClick={() => void act(`/api/applications/${selectedId}/request-info`, { method: "POST" })}>
-              Need info
+              {t.actions.needInfo}
             </button>
           </div>
         </div>
@@ -332,11 +398,11 @@ export function AdminPanel({ startParam, onExit }: Props) {
             >
               <p className="font-display text-2xl">{item.first_name || item.user_id}</p>
               <p className="text-sm text-ivory/60">
-                {item.city} · {item.status}
+                {item.city} · {statusLabel(t, item.status)}
               </p>
             </button>
           ))}
-          {!profiles.length ? <p className="text-ivory/50">No profiles yet.</p> : null}
+          {!profiles.length ? <p className="text-ivory/50">{t.empty.profiles}</p> : null}
         </div>
       ) : null}
 
@@ -351,45 +417,45 @@ export function AdminPanel({ startParam, onExit }: Props) {
             });
           }}
         >
-          <button className="text-xs uppercase text-ivory/50" type="button" onClick={() => setSelectedId("")}>
-            Back
+          <button className="min-h-11 text-xs uppercase text-ivory/50" type="button" onClick={() => setSelectedId("")}>
+            {t.back}
           </button>
           {profileDetail.photos[0] ? <PhotoThumb id={profileDetail.photos[0].id} large /> : null}
-          <input className={field} value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Name" />
-          <input className={field} value={editCity} onChange={(e) => setEditCity(e.target.value)} placeholder="City" />
-          <textarea className={`${field} py-3`} rows={4} value={editAbout} onChange={(e) => setEditAbout(e.target.value)} placeholder="About" />
+          <input className={field} value={editName} onChange={(e) => setEditName(e.target.value)} placeholder={t.fields.name} />
+          <input className={field} value={editCity} onChange={(e) => setEditCity(e.target.value)} placeholder={t.fields.city} />
+          <textarea className={`${field} py-3`} rows={4} value={editAbout} onChange={(e) => setEditAbout(e.target.value)} placeholder={t.fields.about} />
           <button className={goldBtn} disabled={busy}>
-            Save profile
+            {t.actions.saveProfile}
           </button>
           <div className="grid grid-cols-2 gap-2">
             <button className={goldBtn} type="button" disabled={busy} onClick={() => void act(`/api/admin/profiles/${selectedId}`, { method: "PATCH", body: JSON.stringify({ status: "public" }) })}>
-              Approve
+              {t.actions.approve}
             </button>
             <button className={ghostBtn} type="button" disabled={busy} onClick={() => void act(`/api/admin/profiles/${selectedId}`, { method: "PATCH", body: JSON.stringify({ status: "hidden" }) })}>
-              Hide
+              {t.actions.hide}
             </button>
           </div>
           <div className="space-y-2">
             {profileDetail.photos.map((photo) => (
               <div key={photo.id} className="flex items-center gap-3 border border-white/10 p-2">
                 <PhotoThumb id={photo.id} />
-                <button className="text-xs uppercase text-gold" type="button" disabled={busy} onClick={() => void act(`/api/photos/${photo.id}/approve`, { method: "POST" })}>
-                  Approve
+                <button className="min-h-11 text-xs uppercase text-gold" type="button" disabled={busy} onClick={() => void act(`/api/photos/${photo.id}/approve`, { method: "POST" })}>
+                  {t.actions.useAnyway}
                 </button>
-                <button className="text-xs uppercase text-ivory/50" type="button" disabled={busy} onClick={() => void act(`/api/photos/${photo.id}/reject`, { method: "POST" })}>
-                  Reject
+                <button className="min-h-11 text-xs uppercase text-ivory/50" type="button" disabled={busy} onClick={() => void act(`/api/photos/${photo.id}/reject`, { method: "POST" })}>
+                  {t.actions.reject}
                 </button>
               </div>
             ))}
           </div>
           <div className="space-y-2">
-            <p className="text-xs uppercase tracking-[0.14em] text-gold">Admin notes</p>
+            <p className="text-xs uppercase tracking-[0.14em] text-gold">{t.nav.notes}</p>
             {profileDetail.notes.map((item) => (
               <p key={item.id} className="text-sm text-ivory/70">
                 {item.note}
               </p>
             ))}
-            <textarea className={`${field} py-3`} rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Private note" />
+            <textarea className={`${field} py-3`} rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder={t.fields.note} />
             <button
               className={ghostBtn}
               type="button"
@@ -400,7 +466,7 @@ export function AdminPanel({ startParam, onExit }: Props) {
                 }
               }}
             >
-              Add note
+              {t.actions.addNote}
             </button>
           </div>
         </form>
@@ -411,36 +477,43 @@ export function AdminPanel({ startParam, onExit }: Props) {
           {photos.map((photo) => (
             <article key={photo.id} className="border border-white/10 p-3">
               <PhotoThumb id={photo.id} large />
-              <p className="mt-2 text-xs uppercase text-gold">{photo.photo_status || photo.review?.status || "saved"}</p>
+              {photo.review?.has_annotation ? <AnnotationThumb id={photo.id} /> : null}
+              <p className="mt-2 text-xs uppercase text-gold">{statusLabel(t, photo.review?.status || photo.photo_status)}</p>
+              {photo.review?.status === "AI_UNAVAILABLE" ? (
+                <p className="mt-2 text-sm text-ivory/70">{t.photo.unavailable}</p>
+              ) : null}
               {photo.review ? (
                 <div className="mt-2 space-y-1 text-sm text-ivory/70">
-                  <p>Face visible: {photo.review.face_visible ? "yes" : "no"}</p>
-                  <p>Main person: {photo.review.main_person_detected ? "yes" : "no"}</p>
-                  <p>Quality: {photo.review.quality || "—"}</p>
+                  <p>{t.photo.face}: {photo.review.face_visible ? t.photo.yes : t.photo.no}</p>
+                  <p>{t.photo.person}: {photo.review.main_person_detected ? t.photo.yes : t.photo.no}</p>
+                  <p>{t.photo.quality}: {photo.review.quality || "—"}</p>
                   {(photo.review.issues || []).map((issue, index) => (
                     <p key={`${photo.id}-issue-${index}`}>• {issue.message || issue.type}</p>
                   ))}
-                  {photo.review.admin_override ? <p>Admin decision: {photo.review.admin_override}</p> : null}
+                  {photo.review.admin_override ? <p>{t.photo.decision}: {statusLabel(t, photo.review.admin_override)}</p> : null}
                 </div>
               ) : null}
-              <div className="mt-3 grid grid-cols-2 gap-2">
+              <div className="mt-3 grid grid-cols-1 gap-2">
                 <button className={goldBtn} type="button" disabled={busy} onClick={() => void act(`/api/photos/${photo.id}/approve`, { method: "POST" })}>
-                  Approve
+                  {t.actions.useAnyway}
+                </button>
+                <button className={ghostBtn} type="button" disabled={busy} onClick={() => void act(`/api/photos/${photo.id}/request-info`, { method: "POST" })}>
+                  {t.actions.requestNew}
                 </button>
                 <button className={ghostBtn} type="button" disabled={busy} onClick={() => void act(`/api/photos/${photo.id}/reject`, { method: "POST" })}>
-                  Reject
+                  {t.actions.reject}
                 </button>
               </div>
             </article>
           ))}
-          {!photos.length ? <p className="text-ivory/50">No photos yet.</p> : null}
+          {!photos.length ? <p className="text-ivory/50">{t.empty.photos}</p> : null}
         </div>
       ) : null}
 
       {section === "matches" && !selectedId ? (
         <div className="space-y-3">
           <button className={goldBtn} type="button" disabled={busy} onClick={() => void act("/api/admin/matches/run", { method: "POST", body: "{}" })}>
-            Run matching
+            {t.actions.runMatching}
           </button>
           {matches.map((item) => (
             <button
@@ -453,29 +526,28 @@ export function AdminPanel({ startParam, onExit }: Props) {
                 {String(item.user_name || item.user_id)} → {String(item.matched_name || item.matched_user_id)}
               </p>
               <p className="text-sm text-ivory/60">
-                {String(item.status)} · score {String(item.score || "—")}
+                {statusLabel(t, String(item.status))} · {String(item.score || "—")}
               </p>
             </button>
           ))}
-          {!matches.length ? <p className="text-ivory/50">No matches yet.</p> : null}
+          {!matches.length ? <p className="text-ivory/50">{t.empty.matches}</p> : null}
         </div>
       ) : null}
 
       {section === "matches" && selectedId ? (
         <div className="space-y-4">
-          <button className="text-xs uppercase text-ivory/50" type="button" onClick={() => setSelectedId("")}>
-            Back
+          <button className="min-h-11 text-xs uppercase text-ivory/50" type="button" onClick={() => setSelectedId("")}>
+            {t.back}
           </button>
           <p className="font-display text-2xl">
             {String((matchDetail?.match as Record<string, unknown> | undefined)?.user_name || "")} →{" "}
             {String((matchDetail?.match as Record<string, unknown> | undefined)?.matched_name || "")}
           </p>
-          <p className="text-ivory/60">{String((matchDetail?.match as Record<string, unknown> | undefined)?.status || "")}</p>
+          <p className="text-ivory/60">{statusLabel(t, String((matchDetail?.match as Record<string, unknown> | undefined)?.status || ""))}</p>
           <div>
-            <p className="text-xs uppercase tracking-[0.14em] text-gold">Responses</p>
             {((matchDetail?.responses as Array<Record<string, string>>) || []).map((item) => (
               <p key={item.id || item.user_id} className="text-sm text-ivory/70">
-                {item.user_id}: {item.response}
+                {item.response}
               </p>
             ))}
           </div>
@@ -492,7 +564,7 @@ export function AdminPanel({ startParam, onExit }: Props) {
               })
             }
           >
-            Re-run matching
+            {t.actions.rerun}
           </button>
         </div>
       ) : null}
@@ -504,18 +576,18 @@ export function AdminPanel({ startParam, onExit }: Props) {
               <p>
                 {item.user_name || item.user_id} → {item.matched_name || item.matched_user_id}
               </p>
-              <p className="text-sm text-ivory/60">{item.status}</p>
+              <p className="text-sm text-ivory/60">{statusLabel(t, item.status)}</p>
               <div className="mt-2 grid grid-cols-2 gap-2">
                 <button className={goldBtn} type="button" disabled={busy} onClick={() => void act(`/api/admin/introductions/${item.id}`, { method: "PATCH", body: JSON.stringify({ status: "scheduled" }) })}>
-                  Schedule
+                  {t.actions.schedule}
                 </button>
                 <button className={ghostBtn} type="button" disabled={busy} onClick={() => void act(`/api/admin/introductions/${item.id}`, { method: "PATCH", body: JSON.stringify({ status: "completed" }) })}>
-                  Complete
+                  {t.actions.complete}
                 </button>
               </div>
             </article>
           ))}
-          {!intros.length ? <p className="text-ivory/50">No introductions yet.</p> : null}
+          {!intros.length ? <p className="text-ivory/50">{t.empty.introductions}</p> : null}
         </div>
       ) : null}
 
@@ -529,7 +601,7 @@ export function AdminPanel({ startParam, onExit }: Props) {
               <p className="text-ivory/70">{item.message}</p>
             </article>
           ))}
-          {!feedback.length ? <p className="text-ivory/50">No feedback yet.</p> : null}
+          {!feedback.length ? <p className="text-ivory/50">{t.empty.feedback}</p> : null}
         </div>
       ) : null}
 
@@ -537,10 +609,22 @@ export function AdminPanel({ startParam, onExit }: Props) {
         <div className="space-y-3">
           {alerts.map((item) => (
             <article key={item.id} className="border border-white/10 p-3 text-sm text-ivory/70">
-              {item.type} · {item.channel} · {item.status}
+              {item.type} · {item.status}
             </article>
           ))}
-          {!alerts.length ? <p className="text-ivory/50">No notifications yet.</p> : null}
+          {!alerts.length ? <p className="text-ivory/50">{t.empty.notifications}</p> : null}
+        </div>
+      ) : null}
+
+      {section === "notes" ? (
+        <div className="space-y-3">
+          {adminNotes.map((item) => (
+            <article key={item.id} className="border border-white/10 p-4 text-sm">
+              <p className="text-gold">{item.first_name || item.user_id}</p>
+              <p className="mt-2 text-ivory/80">{item.note}</p>
+            </article>
+          ))}
+          {!adminNotes.length ? <p className="text-ivory/50">{t.empty.notes}</p> : null}
         </div>
       ) : null}
 
@@ -548,10 +632,10 @@ export function AdminPanel({ startParam, onExit }: Props) {
         <div className="space-y-3">
           {history.map((item) => (
             <article key={item.id} className="border border-white/10 p-3 text-sm text-ivory/70">
-              {item.action} · {item.entity_type} · {item.admin_telegram_id}
+              {item.action} · {item.entity_type}
             </article>
           ))}
-          {!history.length ? <p className="text-ivory/50">No admin actions yet.</p> : null}
+          {!history.length ? <p className="text-ivory/50">{t.empty.history}</p> : null}
         </div>
       ) : null}
 
@@ -560,9 +644,13 @@ export function AdminPanel({ startParam, onExit }: Props) {
           {blog.map((item) => (
             <article key={item.id} className="border border-white/10 p-4">
               <p>{item.title || item.slug}</p>
-              <div className="mt-2 grid grid-cols-3 gap-2">
+              <p className="text-xs uppercase text-gold">{statusLabel(t, item.status)}</p>
+              <div className="mt-2 grid grid-cols-2 gap-2">
                 <button className={goldBtn} type="button" disabled={busy} onClick={() => void act(`/api/admin/blog/${item.id}/publish`, { method: "POST" })}>
-                  Publish
+                  {t.actions.publish}
+                </button>
+                <button className={ghostBtn} type="button" disabled={busy} onClick={() => void act(`/api/admin/blog/${item.id}/unpublish`, { method: "POST" })}>
+                  {t.actions.unpublish}
                 </button>
                 <button className={ghostBtn} type="button" disabled={busy} onClick={() => void act(`/api/admin/blog/${item.id}/en`, { method: "POST" })}>
                   EN
@@ -570,10 +658,13 @@ export function AdminPanel({ startParam, onExit }: Props) {
                 <button className={ghostBtn} type="button" disabled={busy} onClick={() => void act(`/api/admin/blog/${item.id}/es`, { method: "POST" })}>
                   ES
                 </button>
+                <button className={ghostBtn} type="button" disabled={busy} onClick={() => void act(`/api/admin/blog/${item.id}/delete`, { method: "POST" })}>
+                  {t.actions.delete}
+                </button>
               </div>
             </article>
           ))}
-          {!blog.length ? <p className="text-ivory/50">No blog drafts yet.</p> : null}
+          {!blog.length ? <p className="text-ivory/50">{t.empty.blog}</p> : null}
         </div>
       ) : null}
 
@@ -583,11 +674,39 @@ export function AdminPanel({ startParam, onExit }: Props) {
             <article key={item.id} className="border border-white/10 p-4 text-sm">
               <p>{item.first_name || item.id}</p>
               <p className="text-ivory/60">
-                {item.role} · {item.status} · {item.city || "—"}
+                {item.role} · {statusLabel(t, item.status)} · {item.city || "—"}
               </p>
             </article>
           ))}
-          {!users.length ? <p className="text-ivory/50">No users yet.</p> : null}
+          {!users.length ? <p className="text-ivory/50">{t.empty.users}</p> : null}
+        </div>
+      ) : null}
+
+      {section === "settings" ? (
+        <div className="space-y-5">
+          <div>
+            <p className="text-xs uppercase tracking-[0.14em] text-gold">{t.language}</p>
+            <p className="mt-2 text-sm text-ivory/70">{t.settingsHint}</p>
+            <div className="mt-3 grid grid-cols-1 gap-2">
+              {adminLocales.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`${locale === item.id ? goldBtn : ghostBtn}`}
+                  onClick={() => void saveLocale(item.id)}
+                >
+                  {item.flag} {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {(["introductions", "feedback", "history", "users"] as Section[]).map((item) => (
+              <button key={item} type="button" className={ghostBtn} onClick={() => setSection(item)}>
+                {navLabel(item)}
+              </button>
+            ))}
+          </div>
         </div>
       ) : null}
     </div>

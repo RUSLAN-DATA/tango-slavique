@@ -17,21 +17,23 @@ import {
   listPhotos,
   publicPhotoView,
   saveUserPhoto,
-  setPhotoStatus,
   setPrimaryPhoto,
 } from "./photos/service";
-import { reviewUserPhoto } from "./photos/review";
+import { overridePhotoReview, reviewUserPhoto } from "./photos/review";
+import { notifyUser } from "./notifications/service";
 import { newId, nowIso } from "./crypto";
 import { sendAdminMessage } from "./telegram/notifications";
 import { notifyNewProfile } from "./telegram/profileCards";
 import { ageFromBirthDate, birthDateFromAge } from "./profile/age";
 import {
   articleWithTranslations,
+  deleteArticle,
   generateBlogLocale,
   listBlogDrafts,
   listPublishedBlog,
   publishArticle,
   publicBlogView,
+  unpublishArticle,
 } from "./blog/service";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -206,7 +208,23 @@ export async function handleApi(
         id: user.id,
         role: isAdminUser(env, user) ? "admin" : "user",
         status: user.status,
+        adminLocale: isAdminUser(env, user) ? user.admin_locale || "en" : undefined,
       });
+    });
+  }
+
+  if (path === "/api/me" && method === "PATCH") {
+    return wrap(async () => {
+      const user = await requireAdmin(env, request);
+      const body = await readJson(request);
+      const locale = typeof body.adminLocale === "string" ? body.adminLocale : "";
+      if (locale !== "en" && locale !== "es" && locale !== "ru") {
+        return apiError("VALIDATION_ERROR", "adminLocale must be en, es or ru", 400);
+      }
+      await env.DB.prepare("UPDATE users SET admin_locale = ?, updated_at = ? WHERE id = ?")
+        .bind(locale, nowIso(), user.id)
+        .run();
+      return apiOk({ adminLocale: locale });
     });
   }
 
@@ -277,7 +295,10 @@ export async function handleApi(
         )
           .bind(nowIso(), updated.user_id)
           .run();
-        await runMatchingForUser(env, updated.user_id);
+        const created = await runMatchingForUser(env, updated.user_id);
+        if (created > 0) {
+          await notifyUser(env, updated.user_id, "match_new", { created });
+        }
       }
       await sendAdminMessage(
         env,
@@ -414,6 +435,7 @@ export async function handleApi(
         silent: true,
       });
       await notifyNewProfile(env, user.id).catch(() => false);
+      await notifyUser(env, user.id, "application_submitted", { source: "miniapp" });
       return apiOk({ submitted: true });
     });
   }
@@ -542,7 +564,7 @@ export async function handleApi(
     });
   }
 
-  const photoId = path.match(/^\/api\/photos\/([a-f0-9]+)(?:\/(approve|reject|primary))?$/);
+  const photoId = path.match(/^\/api\/photos\/([a-f0-9]+)(?:\/(approve|reject|primary|request-info))?$/);
   if (photoId && method === "GET" && !photoId[2]) {
     return wrap(async () => {
       const user = await requireUser(env, request);
@@ -603,9 +625,19 @@ export async function handleApi(
 
   if (photoId && photoId[2] && photoId[2] !== "primary" && method === "POST") {
     return wrap(async () => {
-      await requireAdmin(env, request);
-      const status = photoId[2] === "approve" ? "approved" : "rejected";
-      const updated = await setPhotoStatus(env, photoId[1], status);
+      const admin = await requireAdmin(env, request);
+      const action =
+        photoId[2] === "approve"
+          ? "approved"
+          : photoId[2] === "reject"
+            ? "rejected"
+            : "info_requested";
+      const updated = await overridePhotoReview(
+        env,
+        photoId[1],
+        action,
+        admin.telegram_user_id || admin.id
+      );
       if (!updated) {
         return apiError("NOT_FOUND", "Photo not found", 404);
       }
@@ -664,6 +696,9 @@ export async function handleApi(
           : "";
       if (targetUserId) {
         const created = await runMatchingForUser(env, targetUserId);
+        if (created > 0) {
+          await notifyUser(env, targetUserId, "match_new", { created });
+        }
         return apiOk({ created, user_id: targetUserId });
       }
       const result = await runMatchingForAll(env);
@@ -891,6 +926,19 @@ export async function handleApi(
     });
   }
 
+  if (path === "/api/admin/notes" && method === "GET") {
+    return wrap(async () => {
+      await requireAdmin(env, request);
+      const rows = await env.DB.prepare(
+        `SELECT n.id, n.user_id, n.note, n.created_at, n.admin_telegram_id, p.first_name
+         FROM admin_notes n
+         LEFT JOIN profiles p ON p.user_id = n.user_id
+         ORDER BY n.created_at DESC LIMIT 100`
+      ).all();
+      return apiOk({ items: rows.results || [] });
+    });
+  }
+
   if (path === "/api/admin/notes" && method === "POST") {
     return wrap(async () => {
       const admin = await requireAdmin(env, request);
@@ -937,7 +985,7 @@ export async function handleApi(
     });
   }
 
-  const adminBlog = path.match(/^\/api\/admin\/blog\/([a-f0-9]+)\/(publish|en|es)$/);
+  const adminBlog = path.match(/^\/api\/admin\/blog\/([a-f0-9]+)\/(publish|en|es|unpublish|delete)$/);
   if (adminBlog && method === "POST") {
     return wrap(async () => {
       await requireAdmin(env, request);
@@ -947,6 +995,20 @@ export async function handleApi(
           return apiError("NOT_FOUND", "Article not found", 404);
         }
         return apiOk(article);
+      }
+      if (adminBlog[2] === "unpublish") {
+        const article = await unpublishArticle(env, adminBlog[1]);
+        if (!article) {
+          return apiError("NOT_FOUND", "Article not found", 404);
+        }
+        return apiOk(article);
+      }
+      if (adminBlog[2] === "delete") {
+        const ok = await deleteArticle(env, adminBlog[1]);
+        if (!ok) {
+          return apiError("NOT_FOUND", "Article not found", 404);
+        }
+        return apiOk({ deleted: true });
       }
       const ok = await generateBlogLocale(env, adminBlog[1], adminBlog[2] as "en" | "es");
       return apiOk({ translated: ok });
@@ -969,6 +1031,8 @@ export async function handleApi(
         introductions,
         feedback,
         users,
+        notifications,
+        pendingProfiles,
       ] = await Promise.all([
         count("SELECT COUNT(*) as n FROM applications"),
         count("SELECT COUNT(*) as n FROM applications WHERE status IN ('new','info_requested')"),
@@ -978,16 +1042,20 @@ export async function handleApi(
         count("SELECT COUNT(*) as n FROM introductions"),
         count("SELECT COUNT(*) as n FROM feedback"),
         count("SELECT COUNT(*) as n FROM users"),
+        count("SELECT COUNT(*) as n FROM notifications"),
+        count("SELECT COUNT(*) as n FROM profiles WHERE status IN ('pending','draft')"),
       ]);
       return apiOk({
         applications,
         pendingApplications,
         profiles,
         pendingPhotos,
+        pendingProfiles,
         matches,
         introductions,
         feedback,
         users,
+        notifications,
       });
     });
   }
@@ -1109,7 +1177,11 @@ export async function handleApi(
         .run();
       const row = await env.DB.prepare("SELECT * FROM introductions WHERE id = ?")
         .bind(adminIntro[1])
-        .first();
+        .first<{ user_id: string; matched_user_id: string; status: string }>();
+      if (row && (status === "scheduled" || status === "completed" || status === "active")) {
+        await notifyUser(env, row.user_id, "introduction_new", { id: adminIntro[1] });
+        await notifyUser(env, row.matched_user_id, "introduction_new", { id: adminIntro[1] });
+      }
       return apiOk(row || { id: adminIntro[1], status });
     });
   }

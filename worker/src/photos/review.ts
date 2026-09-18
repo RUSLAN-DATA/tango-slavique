@@ -2,6 +2,7 @@ import type { Env } from "../env";
 import { geminiGenerateJson, imagePart, textPart } from "../ai/gemini";
 import { newId, nowIso, sha256Bytes } from "../crypto";
 import { sendAdminPhotoFile, sendAdminMessage } from "../telegram/notifications";
+import { notifyUser } from "../notifications/service";
 import { miniAppStartLink } from "../telegram/miniAppLinks";
 import { buildAnnotationPng } from "./annotate";
 import { getPhoto, type PhotoRow } from "./service";
@@ -284,5 +285,15 @@ export async function overridePhotoReview(
   )
     .bind(newId(), adminId, action, photoId, nowIso())
     .run();
-  return getPhoto(env, photoId);
+  const updated = await getPhoto(env, photoId);
+  if (updated) {
+    const type =
+      action === "approved"
+        ? "photo_approved"
+        : action === "rejected"
+          ? "photo_rejected"
+          : "photo_info_requested";
+    await notifyUser(env, updated.user_id, type, { photoId });
+  }
+  return updated;
 }

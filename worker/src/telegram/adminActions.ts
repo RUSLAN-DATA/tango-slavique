@@ -13,6 +13,8 @@ import {
   generateBlogLocale,
   listBlogDrafts,
   publishArticle,
+  unpublishArticle,
+  deleteArticle,
   articleWithTranslations,
 } from "../blog/service";
 import { isTelegramAdmin, parseTelegramAdminIds } from "./adminIds";
@@ -294,7 +296,7 @@ export async function handleAdminCallback(
     return;
   }
 
-  const blogAct = data.match(/^(b|g):(p|v|en|es):([a-f0-9]{8,32})$/i);
+  const blogAct = data.match(/^(b|g):(p|v|en|es|c|e):([a-f0-9]{8,32})$/i);
   if (blogAct) {
     const kind = blogAct[1].toLowerCase();
     const action = blogAct[2].toLowerCase();
@@ -305,6 +307,17 @@ export async function handleAdminCallback(
       await reply("Article published.");
       return;
     }
+    if (action === "c" && kind === "b") {
+      await deleteArticle(env, id);
+      await answerTelegramCallbackQuery(env, callbackId, "Cancelled");
+      await reply("Draft cancelled.");
+      return;
+    }
+    if (action === "e" && kind === "b") {
+      await answerTelegramCallbackQuery(env, callbackId);
+      await reply("Send a new photo and text to create another draft, then cancel this one if you do not need it.");
+      return;
+    }
     if (action === "v") {
       const bundle = await articleWithTranslations(env, id);
       await answerTelegramCallbackQuery(env, callbackId);
@@ -312,9 +325,15 @@ export async function handleAdminCallback(
         await reply("Draft not found.");
         return;
       }
-      const first = bundle.translations[0];
+      const en = bundle.translations.find((row) => row.locale === "en");
+      const es = bundle.translations.find((row) => row.locale === "es");
       await reply(
-        `${first?.title || "Draft"}\n\n${(first?.body || "").slice(0, 700)}`
+        [
+          en ? `🇬🇧 ${en.title}\n${(en.body || "").slice(0, 500)}` : "",
+          es ? `🇪🇸 ${es.title}\n${(es.body || "").slice(0, 500)}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n\n") || "Draft not found."
       );
       return;
     }

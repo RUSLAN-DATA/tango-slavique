@@ -39,5 +39,9 @@ export function parseAdminCaption(caption: string, hasPhoto: boolean): AdminInte
     return { type: "attach", name: text };
   }
 
+  if (hasPhoto && text.length >= 8) {
+    return { type: "blog", text };
+  }
+
   return { type: "unknown" };
 }

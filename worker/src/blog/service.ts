@@ -1,7 +1,7 @@
 import type { Env } from "../env";
 import { geminiGenerateJson, textPart } from "../ai/gemini";
 import { newId, nowIso } from "../crypto";
-import { detectLocale, otherLocale, type SiteLocale } from "./language";
+import { detectLocale, type SiteLocale } from "./language";
 import { sendAdminMessage } from "../telegram/notifications";
 
 export type BlogArticle = {
@@ -37,12 +37,12 @@ function blogKeyboard(id: string) {
   return {
     inline_keyboard: [
       [
-        { text: "🇬🇧 English", callback_data: `g:en:${id}` },
-        { text: "🇪🇸 Spanish", callback_data: `g:es:${id}` },
+        { text: "👀 Preview", callback_data: `b:v:${id}` },
+        { text: "🌐 Publish", callback_data: `b:p:${id}` },
       ],
       [
-        { text: "🌐 Publish", callback_data: `b:p:${id}` },
-        { text: "👀 Preview", callback_data: `b:v:${id}` },
+        { text: "✏️ Edit", callback_data: `b:e:${id}` },
+        { text: "❌ Cancel", callback_data: `b:c:${id}` },
       ],
     ],
   };
@@ -91,19 +91,20 @@ export async function createBlogDraft(
     .run();
 
   const article = (await getArticle(env, id))!;
+  await generateBlogLocale(env, id, "en").catch(() => undefined);
+  await generateBlogLocale(env, id, "es").catch(() => undefined);
+  const bundle = await articleWithTranslations(env, id);
+  const en = bundle?.translations.find((row) => row.locale === "en");
+  const es = bundle?.translations.find((row) => row.locale === "es");
   await sendAdminMessage(
     env,
     [
       "📝 NEW BLOG DRAFT",
-      `Title: ${title}`,
-      `Languages: ${resolved === "en" ? "🇬🇧 EN" : "🇪🇸 ES"}`,
+      `🇬🇧 ${en?.title || title}`,
+      `🇪🇸 ${es?.title || title}`,
     ].join("\n"),
     { reply_markup: blogKeyboard(id) }
   ).catch(() => false);
-
-  if (resolved === "en" || resolved === "es") {
-    await generateBlogLocale(env, id, otherLocale(resolved)).catch(() => undefined);
-  }
 
   return article;
 }
@@ -232,6 +233,31 @@ export async function publishArticle(env: Env, id: string): Promise<BlogArticle 
     .bind(now, now, id)
     .run();
   return getArticle(env, id);
+}
+
+export async function unpublishArticle(env: Env, id: string): Promise<BlogArticle | null> {
+  const now = nowIso();
+  await env.DB.prepare(
+    "UPDATE blog_articles SET status = 'draft', published_at = NULL, updated_at = ? WHERE id = ?"
+  )
+    .bind(now, id)
+    .run();
+  return getArticle(env, id);
+}
+
+export async function deleteArticle(env: Env, id: string): Promise<boolean> {
+  const article = await getArticle(env, id);
+  if (!article) {
+    return false;
+  }
+  if (article.cover_r2_key) {
+    await env.PHOTOS.delete(article.cover_r2_key).catch(() => undefined);
+  }
+  await env.DB.prepare("DELETE FROM blog_translations WHERE article_id = ?")
+    .bind(id)
+    .run();
+  await env.DB.prepare("DELETE FROM blog_articles WHERE id = ?").bind(id).run();
+  return true;
 }
 
 export function publicBlogView(

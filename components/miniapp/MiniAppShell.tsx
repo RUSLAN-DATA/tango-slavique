@@ -93,6 +93,7 @@ export function MiniAppShell() {
   const [adminMode, setAdminMode] = useState(false);
   const [startParam, setStartParam] = useState("");
   const [editing, setEditing] = useState(false);
+  const [uploadLabel, setUploadLabel] = useState("");
   const submitted = String(profile.status || "") !== "draft" && Boolean(profile.first_name);
 
   const tabs = useMemo(() => {
@@ -221,18 +222,29 @@ export function MiniAppShell() {
     return result.ok;
   }
 
-  async function uploadPhoto(file: File) {
-    const body = new FormData();
-    body.set("file", file);
+  async function uploadPhotos(files: File[]) {
+    if (!files.length) return;
     setBusy(true);
-    const result = await workerRequest("/api/photos", { method: "POST", body });
-    setBusy(false);
-    if (!result.ok) {
-      setError(friendly(result.error?.message, t.needPhoto));
-      return;
+    for (let i = 0; i < files.length; i += 1) {
+      setUploadLabel(`${t.uploading} ${i + 1}/${files.length}`);
+      const body = new FormData();
+      body.set("file", files[i]);
+      const result = await workerRequest("/api/photos", { method: "POST", body });
+      if (!result.ok) {
+        setBusy(false);
+        setUploadLabel("");
+        setError(friendly(result.error?.message, t.needPhoto));
+        return;
+      }
     }
+    setUploadLabel("");
+    setBusy(false);
     setError("");
     await refresh();
+  }
+
+  async function uploadPhoto(file: File) {
+    await uploadPhotos([file]);
   }
 
   if (loading) {
@@ -278,9 +290,10 @@ export function MiniAppShell() {
             preferences={preferences}
             photos={photos}
             busy={busy}
+            uploadLabel={uploadLabel}
             onSave={save}
             onPrefs={savePrefs}
-            onUpload={uploadPhoto}
+            onUpload={uploadPhotos}
             onDelete={async (id) => {
               setBusy(true);
               await workerRequest(`/api/photos/${id}`, { method: "DELETE" });
@@ -344,10 +357,24 @@ export function MiniAppShell() {
               ))
             ) : <p className="text-ivory/60">{t.noPhotos}</p>}
             <label className={`${ghostBtn} block cursor-pointer text-center leading-[3rem]`}>
-              {t.addPhoto}
-              <input className="hidden" type="file" accept="image/*" onChange={(e) => {
+              {uploadLabel || t.choosePhotos}
+              <input className="hidden" type="file" accept="image/*" multiple onChange={(e) => {
+                const files = Array.from(e.target.files || []);
+                if (files.length) void uploadPhotos(files);
+                e.target.value = "";
+              }} />
+            </label>
+            {uploadLabel ? (
+              <div className="h-1.5 w-full bg-white/10">
+                <div className="h-full w-2/3 animate-pulse bg-gold" />
+              </div>
+            ) : null}
+            <label className={`${ghostBtn} block cursor-pointer text-center leading-[3rem]`}>
+              {t.takePhoto}
+              <input className="hidden" type="file" accept="image/*" capture="environment" onChange={(e) => {
                 const file = e.target.files?.[0];
                 if (file) void uploadPhoto(file);
+                e.target.value = "";
               }} />
             </label>
           </section>
@@ -393,7 +420,15 @@ export function MiniAppShell() {
 
         {tab === "alerts" ? (
           alerts.length ? alerts.map((item) => (
-            <article key={item.id} className="border border-white/10 p-3 text-sm text-ivory/70">{item.type === "application_new" ? t.submitted : item.type}</article>
+            <article key={item.id} className="border border-white/10 p-3 text-sm text-ivory/70">
+              {item.type === "application_approved" || item.type === "profile_approved" ? t.alertApproved
+                : item.type === "application_rejected" ? t.alertRejected
+                : item.type === "application_info_requested" ? t.alertInfo
+                : item.type === "match_new" || item.type === "introduction_new" ? t.alertMatch
+                : item.type.startsWith("photo_") ? t.alertPhoto
+                : item.type === "application_new" || item.type === "application_submitted" ? t.submitted
+                : item.type}
+            </article>
           )) : <p className="text-ivory/60">{t.submitted}</p>
         ) : null}
 
@@ -437,6 +472,7 @@ function Wizard({
   preferences,
   photos,
   busy,
+  uploadLabel,
   onSave,
   onPrefs,
   onUpload,
@@ -450,16 +486,22 @@ function Wizard({
   preferences: Record<string, string>;
   photos: Photo[];
   busy: boolean;
+  uploadLabel: string;
   onSave: (patch: Record<string, unknown>) => Promise<boolean>;
   onPrefs: (patch: Record<string, unknown>) => Promise<boolean>;
-  onUpload: (file: File) => Promise<void>;
+  onUpload: (files: File[]) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onSubmit: () => Promise<void>;
 }) {
   const titles = [t.stepName, t.stepAge, t.stepPlace, t.stepAbout, t.stepLooking, t.stepPhotos, t.stepReview];
   return (
     <section className="space-y-5">
-      <p className="text-xs uppercase tracking-[0.16em] text-ivory/40">{step} / 7</p>
+      <p className="text-xs uppercase tracking-[0.16em] text-ivory/40">{t.stepOf} {step} {t.of} 7</p>
+      <div className="flex gap-1" aria-hidden="true">
+        {[1, 2, 3, 4, 5, 6, 7].map((item) => (
+          <span key={item} className={`h-1.5 flex-1 ${item <= step ? "bg-gold" : "bg-white/10"}`} />
+        ))}
+      </div>
       <h1 className="font-display text-3xl text-ivory">{titles[step - 1]}</h1>
       {step === 1 ? (
         <NameStep value={String(profile.first_name || "")} onContinue={async (name) => { if (await onSave({ first_name: name })) setStep(2); }} busy={busy} t={t} />
@@ -485,9 +527,29 @@ function Wizard({
               <button type="button" className="text-xs uppercase text-ivory/50" onClick={() => onDelete(photo.id)}>{t.remove}</button>
             </div>
           ))}
+          {uploadLabel ? (
+            <>
+              <p className="text-sm text-gold">{uploadLabel}</p>
+              <div className="h-1.5 w-full bg-white/10">
+                <div className="h-full w-2/3 animate-pulse bg-gold" />
+              </div>
+            </>
+          ) : null}
           <label className={`${ghostBtn} block cursor-pointer text-center leading-[3rem]`}>
-            {t.addPhoto}
-            <input className="hidden" type="file" accept="image/*" onChange={(e) => { const file = e.target.files?.[0]; if (file) void onUpload(file); }} />
+            {t.choosePhotos}
+            <input className="hidden" type="file" accept="image/*" multiple onChange={(e) => {
+              const files = Array.from(e.target.files || []);
+              if (files.length) void onUpload(files);
+              e.target.value = "";
+            }} />
+          </label>
+          <label className={`${ghostBtn} block cursor-pointer text-center leading-[3rem]`}>
+            {t.takePhoto}
+            <input className="hidden" type="file" accept="image/*" capture="environment" onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void onUpload([file]);
+              e.target.value = "";
+            }} />
           </label>
           <div className="grid grid-cols-2 gap-2">
             <button type="button" className={ghostBtn} onClick={() => setStep(5)}>{t.back}</button>

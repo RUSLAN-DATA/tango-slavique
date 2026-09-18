@@ -2,6 +2,8 @@ import type { Env } from "../env";
 import { newId, nowIso } from "../crypto";
 import { sendAdminMessage } from "../telegram/notifications";
 import { applicationActionKeyboard } from "../telegram/miniAppLinks";
+import { ageFromBirthDate } from "../profile/age";
+import { notifyUser } from "../notifications/service";
 
 export const APPLICATION_STATUSES = [
   "new",
@@ -30,11 +32,30 @@ function applicationKeyboard(env: Env, id: string) {
   return applicationActionKeyboard(env, id);
 }
 
-function applicationNotice(row: ApplicationRow): string {
+async function applicationNotice(env: Env, row: ApplicationRow): Promise<string> {
+  let age = "";
+  let photoCount = 0;
+  if (row.user_id) {
+    const profile = await env.DB.prepare(
+      "SELECT birth_date FROM profiles WHERE user_id = ?"
+    )
+      .bind(row.user_id)
+      .first<{ birth_date: string | null }>();
+    const years = ageFromBirthDate(profile?.birth_date || null);
+    if (years) age = String(years);
+    const photos = await env.DB.prepare(
+      "SELECT COUNT(*) as n FROM photos WHERE user_id = ?"
+    )
+      .bind(row.user_id)
+      .first<{ n: number }>();
+    photoCount = Number(photos?.n || 0);
+  }
   return [
-    "🆕 NEW PROFILE",
-    `👩 ${row.name || "Application"}`,
-    `📍 ${row.city || "—"}`,
+    "🆕 NEW APPLICATION",
+    `Name: ${row.name || "—"}`,
+    age ? `Age: ${age}` : "",
+    `Location: ${row.city || "—"}`,
+    `Photos: ${photoCount}`,
     row.message ? `📝 ${row.message.slice(0, 240)}` : "",
   ]
     .filter(Boolean)
@@ -86,7 +107,7 @@ export async function createApplication(
     return { application, notified };
   }
   try {
-    notified = await sendAdminMessage(env, applicationNotice(application), {
+    notified = await sendAdminMessage(env, await applicationNotice(env, application), {
       reply_markup: applicationKeyboard(env, id),
     });
     await env.DB.prepare(
@@ -158,5 +179,18 @@ export async function updateApplicationStatus(
   )
     .bind(newId(), adminTelegramId, status, id, now)
     .run();
-  return getApplication(env, id);
+  const updated = await getApplication(env, id);
+  if (updated?.user_id) {
+    const type =
+      status === "approved"
+        ? "application_approved"
+        : status === "rejected"
+          ? "application_rejected"
+          : "application_info_requested";
+    await notifyUser(env, updated.user_id, type, { applicationId: id });
+    if (status === "approved") {
+      await notifyUser(env, updated.user_id, "profile_approved", { applicationId: id });
+    }
+  }
+  return updated;
 }

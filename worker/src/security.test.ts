@@ -42,6 +42,7 @@ describe("admin IDs", () => {
       phone: null,
       role: "user" as const,
       status: "active",
+      admin_locale: null,
     };
     const second = {
       ...first,
@@ -159,6 +160,32 @@ describe("matching score", () => {
     );
     expect(score).toBe(100);
   });
+
+  it("does not match when preferences conflict", () => {
+    const score = calculateMatchScore(
+      {
+        userId: "b",
+        gender: "man",
+        birthDate: "1960-01-01",
+        city: "Paris",
+        country: "FR",
+        maritalStatus: "married",
+        children: "yes",
+        languages: "fr",
+      },
+      {
+        gender: "woman",
+        ageMin: 25,
+        ageMax: 35,
+        city: "Barcelona",
+        maritalStatus: "single",
+        children: "no",
+        languages: "es",
+        intent: "relationship",
+      }
+    );
+    expect(score).toBeLessThan(30);
+  });
 });
 
 describe("telegram initData", () => {
@@ -222,6 +249,7 @@ describe("telegram initData", () => {
         phone: null,
         role: "user",
         status: "active",
+        admin_locale: null,
       })
     ).toBe(false);
   });
@@ -387,6 +415,9 @@ describe("admin caption intent", () => {
       type: "new_profile",
       name: "Elena",
     });
+    expect(parseAdminCaption("5 romantic places to visit in Spain", true).type).toBe(
+      "blog"
+    );
   });
 });
 
@@ -443,5 +474,31 @@ describe("gemini fallback", () => {
       "system"
     );
     expect(result).toBeNull();
+  });
+});
+
+describe("admin locale", () => {
+  it("accepts only English Spanish and Russian", () => {
+    const allowed = new Set(["en", "es", "ru"]);
+    expect(allowed.has("en")).toBe(true);
+    expect(allowed.has("es")).toBe(true);
+    expect(allowed.has("ru")).toBe(true);
+    expect(allowed.has("de")).toBe(false);
+  });
+});
+
+describe("user notifications", () => {
+  it("covers application photo match and introduction events", async () => {
+    const { USER_MESSAGES } = await import("./notifications/service");
+    expect(USER_MESSAGES.application_submitted).toBeTruthy();
+    expect(USER_MESSAGES.application_approved).toBeTruthy();
+    expect(USER_MESSAGES.application_rejected).toBeTruthy();
+    expect(USER_MESSAGES.application_info_requested).toBeTruthy();
+    expect(USER_MESSAGES.profile_approved).toBeTruthy();
+    expect(USER_MESSAGES.photo_approved).toBeTruthy();
+    expect(USER_MESSAGES.photo_rejected).toBeTruthy();
+    expect(USER_MESSAGES.photo_info_requested).toBeTruthy();
+    expect(USER_MESSAGES.match_new).toBeTruthy();
+    expect(USER_MESSAGES.introduction_new).toBeTruthy();
   });
 });

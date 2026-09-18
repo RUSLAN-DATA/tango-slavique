@@ -9,6 +9,7 @@ export type AppUser = {
   phone: string | null;
   role: "user" | "admin";
   status: string;
+  admin_locale: string | null;
 };
 
 export async function createSession(env: Env, userId: string): Promise<string> {
@@ -32,7 +33,7 @@ export async function userFromSessionToken(
   }
   const tokenHash = await sha256Hex(token);
   const row = await env.DB.prepare(
-    `SELECT u.id, u.telegram_user_id, u.email, u.phone, u.role, u.status, s.expires_at
+    `SELECT u.id, u.telegram_user_id, u.email, u.phone, u.role, u.status, u.admin_locale, s.expires_at
      FROM sessions s
      JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = ?`
@@ -50,6 +51,7 @@ export async function userFromSessionToken(
     phone: row.phone,
     role: row.role === "admin" ? "admin" : "user",
     status: row.status,
+    admin_locale: row.admin_locale || null,
   };
 }
 
@@ -89,7 +91,7 @@ export async function upsertTelegramUser(
   lastName?: string
 ): Promise<AppUser> {
   const existing = await env.DB.prepare(
-    "SELECT id, telegram_user_id, email, phone, role, status FROM users WHERE telegram_user_id = ?"
+    "SELECT id, telegram_user_id, email, phone, role, status, admin_locale FROM users WHERE telegram_user_id = ?"
   )
     .bind(telegramUserId)
     .first<AppUser>();
@@ -131,5 +133,6 @@ export async function upsertTelegramUser(
     phone: null,
     role,
     status: "active",
+    admin_locale: null,
   };
 }
