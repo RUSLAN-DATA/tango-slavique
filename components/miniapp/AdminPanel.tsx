@@ -1017,7 +1017,6 @@ export function AdminPanel({ startParam, onExit, locale: localeProp, onLocaleCha
                             setContentFieldId(field.id);
                             setContentDraft(row?.draft_value || published);
                             setContentPreview(true);
-                            setContentPreview(false);
                           }}
                         >
                           {t.content.edit}
@@ -1084,10 +1083,12 @@ export function AdminPanel({ startParam, onExit, locale: localeProp, onLocaleCha
                       onChange={(e) => setContentDraft(e.target.value)}
                       placeholder={t.content.placeholder}
                     />
+                    {contentPreview ? (
                     <div className="space-y-2 border border-white/10 p-3 text-sm">
                       <p className="text-[10px] uppercase tracking-[0.14em] text-gold">{t.content.livePreview}</p>
                       <p className="whitespace-pre-wrap text-ivory">{contentDraft || oldValue}</p>
                     </div>
+                    ) : null}
                     <div className="grid grid-cols-2 gap-2">
                       <button
                         className={ghostBtn}
