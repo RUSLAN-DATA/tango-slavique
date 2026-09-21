@@ -5,19 +5,22 @@ import { listPhotos } from "../photos/service";
 import { sendTelegramMessage, sendTelegramPhotoFile } from "./api";
 import { sendAdminMessage } from "./notifications";
 import { miniAppStartLink } from "./miniAppLinks";
+import { copyFor, localeForAdmin } from "./cmsCopy";
 
 export async function sendProfileCard(
   env: Env,
   chatId: number | string,
   userId: string
 ): Promise<void> {
+  const locale = await localeForAdmin(env, String(chatId));
+  const t = copyFor(locale);
   const profile = await env.DB.prepare(
     "SELECT * FROM profiles WHERE user_id = ? OR id = ?"
   )
     .bind(userId, userId)
     .first<Record<string, unknown>>();
   if (!profile) {
-    await sendTelegramMessage(env, chatId, "Profile not found.");
+    await sendTelegramMessage(env, chatId, t.profileNotFound);
     return;
   }
   const uid = String(profile.user_id);
@@ -28,13 +31,13 @@ export async function sendProfileCard(
     .first<{ gender: string | null; intent: string | null; city: string | null }>();
   const photos = await listPhotos(env, uid);
   const age = ageFromBirthDate(typeof profile.birth_date === "string" ? profile.birth_date : null);
-  const name = String(profile.first_name || "Member");
+  const name = String(profile.first_name || "—");
   const text = [
     `👩 ${name}${age ? `, ${age}` : ""}`,
     `📍 ${profile.city || prefs?.city || "—"}`,
-    prefs?.intent ? `❤️ Looking for: ${prefs.intent}` : "",
+    prefs?.intent ? `❤️ ${t.lookingFor}: ${prefs.intent}` : "",
     profile.about ? `📝 ${(profile.about as string).slice(0, 400)}` : "",
-    `📸 ${photos.length} photos`,
+    `📸 ${photos.length}`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -42,16 +45,16 @@ export async function sendProfileCard(
   await sendTelegramMessage(env, chatId, text, {
     reply_markup: {
       inline_keyboard: [
-        [{ text: "👁 Open", url: miniAppStartLink(env, `prof_${uid}`) }],
+        [{ text: t.btnOpen, url: miniAppStartLink(env, `prof_${uid}`) }],
         [
-          { text: "✅ Approve", callback_data: `p:y:${uid}` },
-          { text: "❌ Reject", callback_data: `p:n:${uid}` },
+          { text: t.btnApprove, callback_data: `p:y:${uid}` },
+          { text: t.btnReject, callback_data: `p:n:${uid}` },
         ],
         [
-          { text: "📸 Photos", callback_data: `p:ph:${uid}` },
-          { text: "💬 Ask question", callback_data: `p:i:${uid}` },
+          { text: t.btnPhotos, callback_data: `p:ph:${uid}` },
+          { text: t.btnAsk, callback_data: `p:i:${uid}` },
         ],
-        [{ text: "🙈 Hide", callback_data: `p:h:${uid}` }],
+        [{ text: t.btnHide, callback_data: `p:h:${uid}` }],
       ],
     },
   });
@@ -92,13 +95,14 @@ export async function notifyNewProfile(
     .first<{ intent: string | null }>();
   const photos = await listPhotos(env, userId);
   const age = ageFromBirthDate(profile?.birth_date || null);
+  const t = copyFor("en");
   const text = [
-    "🆕 NEW PROFILE",
-    `👩 ${profile?.first_name || "Member"}${age ? `, ${age}` : ""}`,
+    `🆕 ${t.newProfile}`,
+    `👩 ${profile?.first_name || "—"}${age ? `, ${age}` : ""}`,
     `📍 ${profile?.city || "—"}`,
-    prefs?.intent ? `❤️ Looking for: ${prefs.intent}` : "",
+    prefs?.intent ? `❤️ ${t.lookingFor}: ${prefs.intent}` : "",
     profile?.about ? `📝 ${profile.about.slice(0, 240)}` : "",
-    `📸 ${photos.length} photos`,
+    `📸 ${photos.length}`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -106,12 +110,12 @@ export async function notifyNewProfile(
     reply_markup: {
       inline_keyboard: [
         [
-          { text: "👁 Open", url: miniAppStartLink(env, `prof_${userId}`) },
-          { text: "✅ Approve", callback_data: `p:y:${userId}` },
+          { text: t.btnOpen, url: miniAppStartLink(env, `prof_${userId}`) },
+          { text: t.btnApprove, callback_data: `p:y:${userId}` },
         ],
         [
-          { text: "❌ Reject", callback_data: `p:n:${userId}` },
-          { text: "ℹ️ Need info", callback_data: `p:i:${userId}` },
+          { text: t.btnReject, callback_data: `p:n:${userId}` },
+          { text: t.btnNeedInfo, callback_data: `p:i:${userId}` },
         ],
       ],
     },

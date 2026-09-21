@@ -32,7 +32,31 @@ describe("public content overlay", () => {
 
   it("covers real website fields", () => {
     expect(contentFields.some((field) => field.dictPath === "hero.title")).toBe(true);
+    expect(contentFields.some((field) => field.dictPath === "pages.faq.items.0.question")).toBe(true);
     expect(defaultContentValue("hero.title", "en")).toContain("Tango Slavique");
     expect(defaultContentValue("form.submit", "es")).toBe("Enviar solicitud");
+    expect(defaultContentValue("pages.faq.items.0.question", "en")).toContain("Who");
+  });
+
+  it("overlays published FAQ answers without inventing extra questions", () => {
+    const source = {
+      pages: {
+        faq: {
+          items: [{ question: "Who is this service for?", answer: "Original" }],
+        },
+      },
+    };
+    const next = applyContentOverrides(source, {
+      "pages.faq.items.0.question": "Who may apply?",
+      "pages.faq.items.0.answer": "Verified applicants.",
+    });
+    expect(next.pages.faq.items[0].question).toBe("Who may apply?");
+    expect(next.pages.faq.items[0].answer).toBe("Verified applicants.");
+    expect(
+      publicContentFilter([
+        { dict_path: "pages.faq.items.0.answer", published_value: "Live FAQ", status: "published" },
+        { dict_path: "pages.faq.items.0.question", published_value: "Draft Q", status: "draft" },
+      ])["pages.faq.items.0.question"]
+    ).toBeUndefined();
   });
 });

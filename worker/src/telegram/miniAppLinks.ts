@@ -1,4 +1,5 @@
 import type { Env } from "../env";
+import { copyFor, type AdminLocale } from "./cmsCopy";
 
 export function telegramBotUsername(env: Env): string {
   return (env.TELEGRAM_BOT_USERNAME || "Tangoslavique_bot").replace(/^@/, "");
@@ -60,16 +61,17 @@ export function adminPanelButton(env: Env, kind: "web_app" | "url") {
   };
 }
 
-export function applicationActionKeyboard(env: Env, applicationId: string) {
+export function applicationActionKeyboard(env: Env, applicationId: string, locale: AdminLocale = "en") {
+  const t = copyFor(locale);
   return {
     inline_keyboard: [
       [
-        { text: "👁 Open", url: miniAppStartLink(env, `app_${applicationId}`) },
-        { text: "✅ Approve", callback_data: `y:${applicationId}` },
+        { text: t.btnOpen, url: miniAppStartLink(env, `app_${applicationId}`) },
+        { text: t.btnApprove, callback_data: `y:${applicationId}` },
       ],
       [
-        { text: "❌ Reject", callback_data: `n:${applicationId}` },
-        { text: "ℹ️ Need info", callback_data: `i:${applicationId}` },
+        { text: t.btnReject, callback_data: `n:${applicationId}` },
+        { text: t.btnNeedInfo, callback_data: `i:${applicationId}` },
       ],
     ],
   };

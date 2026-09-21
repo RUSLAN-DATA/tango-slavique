@@ -8,9 +8,12 @@ import {
   adminLocales,
   isAdminLocale,
   statusLabel,
+  noticeLabel,
   type AdminLocale,
 } from "@/lib/miniapp/adminCopy";
 import { contentPages, contentFields, defaultContentValue, type ContentField } from "@/lib/content/catalog";
+import { parseArticleMarkdown } from "@/lib/blog/format";
+import { ArticleBody } from "@/components/blog/ArticleBody";
 
 type Section =
   | "dashboard"
@@ -175,6 +178,7 @@ export function AdminPanel({ startParam, onExit, locale: localeProp, onLocaleCha
   const [editAbout, setEditAbout] = useState("");
   const [appFilter, setAppFilter] = useState<"new" | "info_requested" | "approved" | "rejected">("new");
   const [infoDraft, setInfoDraft] = useState("");
+  const [noteFilter, setNoteFilter] = useState<"unread" | "read" | "">("");
 
   async function load() {
     const dash = await workerRequest<Record<string, number>>("/api/admin/dashboard");
@@ -701,12 +705,42 @@ export function AdminPanel({ startParam, onExit, locale: localeProp, onLocaleCha
 
       {section === "notifications" ? (
         <div className="space-y-3">
-          {alerts.map((item) => (
-            <article key={item.id} className="border border-white/10 p-3 text-sm text-ivory/70">
-              {item.type} · {item.status}
-            </article>
-          ))}
-          {!alerts.length ? <p className="text-ivory/50">{t.empty.notifications}</p> : null}
+          <p className="text-sm text-ivory/70">{t.notices.explain}</p>
+          <div className="grid grid-cols-2 gap-2">
+            <button className={`${!noteFilter ? goldBtn : ghostBtn}`} type="button" onClick={() => setNoteFilter("")}>
+              {t.notices.unread} / {t.notices.read}
+            </button>
+            <button className={ghostBtn} type="button" disabled={busy} onClick={() => void act("/api/notifications/read-all", { method: "POST" })}>
+              {t.notices.markAll}
+            </button>
+            <button className={`${noteFilter === "unread" ? goldBtn : ghostBtn}`} type="button" onClick={() => setNoteFilter("unread")}>
+              {t.notices.unread}
+            </button>
+            <button className={`${noteFilter === "read" ? goldBtn : ghostBtn}`} type="button" onClick={() => setNoteFilter("read")}>
+              {t.notices.read}
+            </button>
+          </div>
+          {alerts
+            .filter((item) => !noteFilter || item.status === noteFilter)
+            .map((item) => (
+              <article key={item.id} className="border border-white/10 p-3 text-sm">
+                <p className={item.status === "unread" ? "text-ivory" : "text-ivory/60"}>{noticeLabel(t, item.type)}</p>
+                <p className="mt-1 text-xs uppercase text-gold">{item.status === "read" ? t.notices.read : t.notices.unread}</p>
+                {item.status !== "read" ? (
+                  <button
+                    className={`${ghostBtn} mt-2`}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void act(`/api/notifications/${item.id}/read`, { method: "POST" })}
+                  >
+                    {t.notices.markRead}
+                  </button>
+                ) : null}
+              </article>
+            ))}
+          {!alerts.filter((item) => !noteFilter || item.status === noteFilter).length ? (
+            <p className="text-ivory/50">{t.empty.notifications}</p>
+          ) : null}
         </div>
       ) : null}
 
@@ -808,14 +842,25 @@ export function AdminPanel({ startParam, onExit, locale: localeProp, onLocaleCha
                 {t.back}
               </button>
               {blogPreview ? (
-                <div className="space-y-3 border border-white/10 p-4">
+                <div className="space-y-6 border border-white/10 p-4">
                   <p className="text-xs uppercase text-gold">{t.blog.preview}</p>
                   {blogFile ? <p className="text-sm text-ivory/70">{blogFile.name}</p> : null}
-                  <p className="whitespace-pre-wrap text-sm">{blogEn || blogOriginal}</p>
-                  <p className="whitespace-pre-wrap text-sm text-ivory/70">{blogEs}</p>
+                  {(() => {
+                    const en = parseArticleMarkdown(blogEn || blogOriginal);
+                    const es = parseArticleMarkdown(blogEs);
+                    return (
+                      <>
+                        <ArticleBody title={en.title} subtitle={en.subtitle} blocks={en.blocks} />
+                        {blogEs.trim() ? (
+                          <ArticleBody className="border-t border-white/10 pt-6" title={es.title} subtitle={es.subtitle} blocks={es.blocks} />
+                        ) : null}
+                      </>
+                    );
+                  })()}
                 </div>
               ) : null}
               <label className="block text-xs uppercase tracking-[0.14em] text-gold">{t.blog.photo}</label>
+              <p className="text-xs leading-relaxed text-ivory/60">{t.blog.imageGuide}</p>
               <input
                 className="text-sm"
                 type="file"
@@ -823,6 +868,7 @@ export function AdminPanel({ startParam, onExit, locale: localeProp, onLocaleCha
                 onChange={(event) => setBlogFile(event.target.files?.[0] || null)}
               />
               <label className="block text-xs uppercase tracking-[0.14em] text-gold">{t.blog.original}</label>
+              <p className="whitespace-pre-wrap text-xs text-ivory/50">{t.blog.syntax}</p>
               <textarea className={`${field} py-3`} rows={5} value={blogOriginal} onChange={(e) => setBlogOriginal(e.target.value)} placeholder={t.blog.placeholderOriginal} />
               <label className="block text-xs uppercase tracking-[0.14em] text-gold">{t.blog.english}</label>
               <textarea className={`${field} py-3`} rows={5} value={blogEn} onChange={(e) => setBlogEn(e.target.value)} placeholder={t.blog.placeholderEn} />
@@ -950,18 +996,27 @@ export function AdminPanel({ startParam, onExit, locale: localeProp, onLocaleCha
                   const row = contentRows.find(
                     (item) => item.field === field.field && item.page === field.page && item.locale === contentLocale && item.section === field.section
                   );
-                  const live = row?.draft_value || row?.published_value || defaultContentValue(field.dictPath, contentLocale);
+                  const published = row?.published_value || defaultContentValue(field.dictPath, contentLocale);
+                  const draft = row?.draft_value || "";
                   return (
                     <article key={field.id} className="border border-white/10 p-4">
                       <p className="text-sm">{field.label[locale]}</p>
-                      <p className="mt-1 text-xs text-ivory/60">{live.slice(0, 160)}</p>
+                      <p className="mt-2 text-[10px] uppercase tracking-[0.14em] text-gold">{t.content.current}</p>
+                      <p className="mt-1 whitespace-pre-wrap text-sm text-ivory/80">{published}</p>
+                      {draft && draft !== published ? (
+                        <>
+                          <p className="mt-3 text-[10px] uppercase tracking-[0.14em] text-gold">{t.content.draft}</p>
+                          <p className="mt-1 whitespace-pre-wrap text-sm text-ivory/60">{draft}</p>
+                        </>
+                      ) : null}
                       <div className="mt-2 grid grid-cols-2 gap-2">
                         <button
                           className={ghostBtn}
                           type="button"
                           onClick={() => {
                             setContentFieldId(field.id);
-                            setContentDraft(row?.draft_value || live);
+                            setContentDraft(row?.draft_value || published);
+                            setContentPreview(true);
                             setContentPreview(false);
                           }}
                         >
@@ -978,7 +1033,7 @@ export function AdminPanel({ startParam, onExit, locale: localeProp, onLocaleCha
                                 body: JSON.stringify({
                                   fieldId: field.id,
                                   locale: contentLocale,
-                                  draftValue: row?.draft_value || live,
+                                  draftValue: row?.draft_value || published,
                                   action: "publish",
                                 }),
                               });
@@ -1019,21 +1074,20 @@ export function AdminPanel({ startParam, onExit, locale: localeProp, onLocaleCha
                 return (
                   <>
                     <p className="text-sm">{selected?.label[locale]}</p>
-                    {contentPreview ? (
-                      <div className="space-y-2 text-sm">
-                        <p className="text-gold">{t.content.old}</p>
-                        <p className="text-ivory/70">{oldValue}</p>
-                        <p className="text-gold">{t.content.next}</p>
-                        <p>{contentDraft}</p>
-                      </div>
-                    ) : null}
+                    <p className="text-[10px] uppercase tracking-[0.14em] text-gold">{t.content.current}</p>
+                    <p className="whitespace-pre-wrap text-sm text-ivory/70">{oldValue}</p>
+                    <p className="text-[10px] uppercase tracking-[0.14em] text-gold">{t.content.next}</p>
                     <textarea
                       className={`${field} py-3`}
-                      rows={4}
+                      rows={6}
                       value={contentDraft}
                       onChange={(e) => setContentDraft(e.target.value)}
                       placeholder={t.content.placeholder}
                     />
+                    <div className="space-y-2 border border-white/10 p-3 text-sm">
+                      <p className="text-[10px] uppercase tracking-[0.14em] text-gold">{t.content.livePreview}</p>
+                      <p className="whitespace-pre-wrap text-ivory">{contentDraft || oldValue}</p>
+                    </div>
                     <div className="grid grid-cols-2 gap-2">
                       <button
                         className={ghostBtn}

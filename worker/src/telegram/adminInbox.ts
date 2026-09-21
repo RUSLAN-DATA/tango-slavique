@@ -9,6 +9,7 @@ import {
   sendProfileCard,
 } from "./profileCards";
 import { sendTelegramMessage } from "./api";
+import { copyFor, localeForAdmin } from "./cmsCopy";
 import { saveInboxPhotoToUser } from "./inboxSave";
 
 export async function handleAdminMedia(
@@ -18,13 +19,14 @@ export async function handleAdminMedia(
   caption: string,
   file: { bytes: ArrayBuffer; mime: string } | null
 ): Promise<void> {
+  const t = copyFor(await localeForAdmin(env, adminId));
   const intent = parseAdminCaption(caption, Boolean(file));
   const text = caption.trim();
 
   if (intent.type === "blog" || (!file && /^\/blog\b/i.test(text))) {
     const body = intent.type === "blog" ? intent.text : text.replace(/^\/blog\s*/i, "");
     if (!body.trim()) {
-      await sendTelegramMessage(env, chatId, "Send a photo plus the article text to create a draft.");
+      await sendTelegramMessage(env, chatId, t.sendPhotoPlusText);
       return;
     }
     let coverKey: string | null = null;
@@ -41,7 +43,7 @@ export async function handleAdminMedia(
       coverKey,
       createdBy: adminId,
     });
-    await sendTelegramMessage(env, chatId, "Draft saved. Use the buttons to translate or publish.");
+    await sendTelegramMessage(env, chatId, t.savedDraft);
     return;
   }
 
@@ -52,7 +54,7 @@ export async function handleAdminMedia(
   if (intent.type === "new_profile") {
     const userId = await createNamedDraftProfile(env, intent.name);
     await saveInboxPhotoToUser(env, userId, file.bytes, file.mime);
-    await sendTelegramMessage(env, chatId, `Created ${intent.name}. Photo added.`);
+    await sendTelegramMessage(env, chatId, `${t.createdNamed} ${intent.name}`);
     await sendProfileCard(env, chatId, userId);
     return;
   }
@@ -64,17 +66,17 @@ export async function handleAdminMedia(
       await sendTelegramMessage(
         env,
         chatId,
-        `Photo added to ${matches[0].first_name || "profile"}.`
+        `${t.photoAdded} ${matches[0].first_name || ""}`.trim()
       );
       return;
     }
     if (matches.length > 1) {
       await storeInbox(env, adminId, file, caption);
-      await sendTelegramMessage(env, chatId, "Which profile should receive this photo?", {
+      await sendTelegramMessage(env, chatId, t.photoAsk, {
         reply_markup: {
           inline_keyboard: matches.map((row) => [
             {
-              text: `${row.first_name || "Profile"}${row.city ? ` · ${row.city}` : ""}`,
+              text: `${row.first_name || "—"}${row.city ? ` · ${row.city}` : ""}`,
               callback_data: `x:${row.user_id}`,
             },
           ]),
@@ -90,14 +92,10 @@ export async function handleAdminMedia(
   await storeInbox(env, adminId, file, caption);
   const people = recent.results || [];
   if (!people.length) {
-    await sendTelegramMessage(
-      env,
-      chatId,
-      "I saved the photo. Create a profile in Mini App first, or send: New profile Maria"
-    );
+    await sendTelegramMessage(env, chatId, t.photoSavedNew);
     return;
   }
-  await sendTelegramMessage(env, chatId, "Which profile should receive this photo?", {
+  await sendTelegramMessage(env, chatId, t.photoAsk, {
     reply_markup: {
       inline_keyboard: people.map((row) => [
         {

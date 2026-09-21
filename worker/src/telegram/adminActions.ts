@@ -59,11 +59,12 @@ export async function handleAdminCallback(
   replyChatId: number | string | null
 ): Promise<void> {
   const admins = parseTelegramAdminIds(env.TELEGRAM_ADMIN_IDS);
+  const locale = await localeForAdmin(env, fromId);
+  const t = copyFor(locale);
   if (!isTelegramAdmin(admins, fromId)) {
-    await answerTelegramCallbackQuery(env, callbackId, "Not allowed.");
+    await answerTelegramCallbackQuery(env, callbackId, t.notAllowed);
     return;
   }
-
   const chatId = replyChatId ?? fromId;
   const reply = async (text: string) => {
     await sendTelegramMessage(env, chatId, text);
@@ -81,27 +82,26 @@ export async function handleAdminCallback(
     const action = appLegacy[1].toLowerCase();
     const application = await getApplication(env, appLegacy[2]);
     if (!application) {
-      await answerTelegramCallbackQuery(env, callbackId, "Not found.");
+      await answerTelegramCallbackQuery(env, callbackId, t.notFound);
       return;
     }
     if (action === "o") {
-      await answerTelegramCallbackQuery(env, callbackId, "Opened");
+      await answerTelegramCallbackQuery(env, callbackId, t.opened);
       await sendTelegramMessage(
         env,
         chatId,
         [
-          `👩 ${application.name || "Application"}`,
+          `👩 ${application.name || t.applicationLabel}`,
           `📍 ${application.city || "—"}`,
           application.message || "",
         ]
           .filter(Boolean)
           .join("\n"),
-        { reply_markup: applicationActionKeyboard(env, application.id) }
+        { reply_markup: applicationActionKeyboard(env, application.id, locale) }
       );
       return;
     }
     if (action === "i") {
-      const t = copyFor(await localeForAdmin(env, fromId));
       await setWorkflow(env, fromId, {
         workflow: "NEED_INFO",
         step: "WAITING_TEXT",
@@ -116,12 +116,8 @@ export async function handleAdminCallback(
     if (status === "approved" && application.user_id) {
       await approveUser(env, application.user_id, fromId);
     }
-    await answerTelegramCallbackQuery(env, callbackId, "Saved");
-    await reply(
-      status === "approved"
-        ? "Approved. The profile is now visible to the team."
-        : "Rejected. The profile stays private."
-    );
+    await answerTelegramCallbackQuery(env, callbackId, t.ready);
+    await reply(status === "approved" ? t.profileApproved : t.profilePrivate);
     return;
   }
 
@@ -190,14 +186,14 @@ export async function handleAdminCallback(
     ).all<{ user_id: string; first_name: string | null; city: string | null; status: string }>();
     const items = rows.results || [];
     if (!items.length) {
-      await reply("No profiles yet.");
+      await reply(t.noProfiles);
       return;
     }
     for (const item of items) {
       await sendTelegramMessage(
         env,
         chatId,
-        `${item.first_name || "Profile"}${item.city ? ` · ${item.city}` : ""}`,
+        `${item.first_name || "—"}${item.city ? ` · ${item.city}` : ""}`,
         {
           reply_markup: {
             inline_keyboard: [
@@ -274,26 +270,26 @@ export async function handleAdminCallback(
     const action = profileAct[1].toLowerCase();
     const userId = profileAct[2];
     if (action === "v") {
-      await answerTelegramCallbackQuery(env, callbackId, "Opened");
+      await answerTelegramCallbackQuery(env, callbackId, t.opened);
       await sendProfileCard(env, chatId, userId);
       return;
     }
     if (action === "y") {
       await approveUser(env, userId, fromId);
-      await answerTelegramCallbackQuery(env, callbackId, "Approved");
-      await reply("Profile approved.");
+      await answerTelegramCallbackQuery(env, callbackId, t.approved);
+      await reply(t.profileApproved);
       return;
     }
     if (action === "n") {
       await setProfileVisibility(env, userId, "hidden");
-      await answerTelegramCallbackQuery(env, callbackId, "Rejected");
-      await reply("Profile kept private.");
+      await answerTelegramCallbackQuery(env, callbackId, t.rejected);
+      await reply(t.profilePrivate);
       return;
     }
     if (action === "h") {
       await setProfileVisibility(env, userId, "hidden");
-      await answerTelegramCallbackQuery(env, callbackId, "Hidden");
-      await reply("Profile hidden.");
+      await answerTelegramCallbackQuery(env, callbackId, t.profileHidden);
+      await reply(t.profileHidden);
       return;
     }
     if (action === "i") {
@@ -303,14 +299,14 @@ export async function handleAdminCallback(
         .bind(nowIso(), userId)
         .run();
       await answerTelegramCallbackQuery(env, callbackId);
-      await reply("Marked as needs a little more information.");
+      await reply(t.needInfoMarked);
       return;
     }
     if (action === "ph") {
       await answerTelegramCallbackQuery(env, callbackId);
       const photos = await listPhotos(env, userId);
       if (!photos.length) {
-        await reply("No photos yet.");
+        await reply(t.noPhotos);
         return;
       }
       for (const photo of photos.slice(0, 6)) {
@@ -322,13 +318,13 @@ export async function handleAdminCallback(
           await object.arrayBuffer(),
           "photo.jpg",
           photo.mime_type,
-          photo.sort_order === 0 ? "Main photo" : "Photo",
+          photo.sort_order === 0 ? t.mainPhoto : t.photo,
           {
             reply_markup: {
               inline_keyboard: [
                 [
-                  { text: "✅ Use", callback_data: `f:ok:${photo.id}` },
-                  { text: "❌ Reject", callback_data: `f:no:${photo.id}` },
+                  { text: t.btnUse, callback_data: `f:ok:${photo.id}` },
+                  { text: t.btnRejectPhoto, callback_data: `f:no:${photo.id}` },
                 ],
               ],
             },
@@ -349,7 +345,7 @@ export async function handleAdminCallback(
         .first<{ r2_key: string; mime_type: string }>();
       await answerTelegramCallbackQuery(env, callbackId);
       if (!photo) {
-        await reply("Photo not found.");
+        await reply(t.photoNotFound);
         return;
       }
       const object = await env.PHOTOS.get(photo.r2_key);
@@ -367,13 +363,9 @@ export async function handleAdminCallback(
     const mapped =
       action === "ok" ? "approved" : action === "no" ? "rejected" : "info_requested";
     await overridePhotoReview(env, photoId, mapped, fromId);
-    await answerTelegramCallbackQuery(env, callbackId, "Saved");
+    await answerTelegramCallbackQuery(env, callbackId, t.ready);
     await reply(
-      mapped === "approved"
-        ? "Photo approved."
-        : mapped === "rejected"
-          ? "Photo hidden."
-          : "Asked for a new photo."
+      mapped === "approved" ? t.photoAdded : mapped === "rejected" ? t.btnRejectPhoto : t.needInfoMarked
     );
     return;
   }
@@ -385,26 +377,26 @@ export async function handleAdminCallback(
     const id = blogAct[3];
     if (action === "p" && kind === "b") {
       await publishArticle(env, id);
-      await answerTelegramCallbackQuery(env, callbackId, "Published");
-      await reply("Article published.");
+      await answerTelegramCallbackQuery(env, callbackId, t.published);
+      await reply(t.articlePublished);
       return;
     }
     if (action === "c" && kind === "b") {
       await deleteArticle(env, id);
-      await answerTelegramCallbackQuery(env, callbackId, "Cancelled");
-      await reply("Draft cancelled.");
+      await answerTelegramCallbackQuery(env, callbackId, t.cancelled);
+      await reply(t.draftCancelled);
       return;
     }
     if (action === "e" && kind === "b") {
       await answerTelegramCallbackQuery(env, callbackId);
-      await reply("Send a new photo and text to create another draft, then cancel this one if you do not need it.");
+      await reply(t.sendPhotoPlusText);
       return;
     }
     if (action === "v") {
       const bundle = await articleWithTranslations(env, id);
       await answerTelegramCallbackQuery(env, callbackId);
       if (!bundle) {
-        await reply("Draft not found.");
+        await reply(t.draftNotFound);
         return;
       }
       const en = bundle.translations.find((row) => row.locale === "en");
@@ -415,14 +407,14 @@ export async function handleAdminCallback(
           es ? `🇪🇸 ${es.title}\n${(es.body || "").slice(0, 500)}` : "",
         ]
           .filter(Boolean)
-          .join("\n\n") || "Draft not found."
+          .join("\n\n") || t.draftNotFound
       );
       return;
     }
     if (action === "en" || action === "es") {
       const ok = await generateBlogLocale(env, id, action);
-      await answerTelegramCallbackQuery(env, callbackId, ok ? "Ready" : "Could not translate yet");
-      await reply(ok ? `Saved ${action === "en" ? "English" : "Spanish"} version.` : "Translation is unavailable right now. Try again shortly.");
+      await answerTelegramCallbackQuery(env, callbackId, ok ? t.ready : t.translateFail);
+      await reply(ok ? t.translateReady : t.translateFail);
       return;
     }
   }
@@ -430,8 +422,8 @@ export async function handleAdminCallback(
   const attach = data.match(/^x:([a-f0-9]{8,32})$/i);
   if (attach) {
     const ok = await attachLatestInbox(env, fromId, attach[1]);
-    await answerTelegramCallbackQuery(env, callbackId, ok ? "Added" : "Nothing to add");
-    await reply(ok ? "Photo added to the profile." : "I could not find that photo.");
+    await answerTelegramCallbackQuery(env, callbackId, ok ? t.added : t.nothingToAdd);
+    await reply(ok ? t.photoAddedProfile : t.inboxNothing);
     return;
   }
 

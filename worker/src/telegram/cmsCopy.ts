@@ -74,6 +74,48 @@ type BotCopy = {
   needsInfo: string;
   welcomeAdmin: string;
   openPanel: string;
+  syntaxHelp: string;
+  profileNotFound: string;
+  profileApproved: string;
+  profilePrivate: string;
+  profileHidden: string;
+  needInfoMarked: string;
+  noPhotos: string;
+  noProfiles: string;
+  photoNotFound: string;
+  photoAdded: string;
+  photoAsk: string;
+  photoSavedNew: string;
+  createdNamed: string;
+  lookingFor: string;
+  newProfile: string;
+  btnOpen: string;
+  btnApprove: string;
+  btnReject: string;
+  btnNeedInfo: string;
+  btnHide: string;
+  btnPhotos: string;
+  btnAsk: string;
+  btnUse: string;
+  btnRejectPhoto: string;
+  articlePublished: string;
+  draftCancelled: string;
+  draftNotFound: string;
+  translateReady: string;
+  translateFail: string;
+  photoAddedProfile: string;
+  inboxNothing: string;
+  sendPhotoPlusText: string;
+  notFound: string;
+  opened: string;
+  applicationLabel: string;
+  mainPhoto: string;
+  ready: string;
+  added: string;
+  nothingToAdd: string;
+  userWelcome: string;
+  openMiniApp: string;
+  untitled: string;
 };
 
 const en: BotCopy = {
@@ -82,7 +124,7 @@ const en: BotCopy = {
   blogCreate: "Create Blog Post",
   sendPhoto: "Please send the photo. To keep the original image, send it as a file.",
   photoReceived: "Photo received.\nNow send the blog text.",
-  sendText: "Now send the blog text.",
+  sendText: "Now send the blog text. You may use:\n# Heading\n## Subheading\nNormal paragraph.\n**Bold phrase**\n- List item\n> Quote",
   previewTitle: "Blog Preview",
   published: "Blog published successfully.",
   unpublished: "Post is no longer public.",
@@ -135,6 +177,48 @@ const en: BotCopy = {
   needsInfo: "Need information",
   welcomeAdmin: "Open the Admin Panel, or use the menu below.",
   openPanel: "Open Admin Panel",
+  syntaxHelp: "# Heading\n## Subheading\nNormal paragraph.\n**Bold phrase**\n- List item\n> Quote",
+  profileNotFound: "Profile not found.",
+  profileApproved: "Profile approved.",
+  profilePrivate: "Profile kept private.",
+  profileHidden: "Profile hidden.",
+  needInfoMarked: "Marked as needs a little more information.",
+  noPhotos: "No photos yet.",
+  noProfiles: "No profiles yet.",
+  photoNotFound: "Photo not found.",
+  photoAdded: "Photo added.",
+  photoAsk: "Which profile should receive this photo?",
+  photoSavedNew: "I saved the photo. Create a profile in Mini App first, or send: New profile Maria",
+  createdNamed: "Created. Photo added.",
+  lookingFor: "Looking for",
+  newProfile: "NEW PROFILE",
+  btnOpen: "👁 Open",
+  btnApprove: "✅ Approve",
+  btnReject: "❌ Reject",
+  btnNeedInfo: "ℹ️ Need info",
+  btnHide: "🙈 Hide",
+  btnPhotos: "📸 Photos",
+  btnAsk: "💬 Ask question",
+  btnUse: "✅ Use",
+  btnRejectPhoto: "❌ Reject",
+  articlePublished: "Article published.",
+  draftCancelled: "Draft cancelled.",
+  draftNotFound: "Draft not found.",
+  translateReady: "Translation saved.",
+  translateFail: "Translation is unavailable right now. Try again shortly.",
+  photoAddedProfile: "Photo added to the profile.",
+  inboxNothing: "I could not find that photo.",
+  sendPhotoPlusText: "Send a photo plus the article text to create a draft.",
+  notFound: "Not found.",
+  opened: "Opened",
+  applicationLabel: "Application",
+  mainPhoto: "Main photo",
+  ready: "Ready",
+  added: "Added",
+  nothingToAdd: "Nothing to add",
+  userWelcome: "Welcome to Tango Slavique. Open Mini App to create your profile.",
+  openMiniApp: "Open Mini App",
+  untitled: "Untitled",
 };
 
 const es: BotCopy = {
@@ -144,7 +228,7 @@ const es: BotCopy = {
   blogCreate: "Crear una nueva publicación",
   sendPhoto: "Envíe la fotografía. Para conservar la imagen original, envíela como archivo.",
   photoReceived: "Foto recibida.\nAhora envíe el texto.",
-  sendText: "Ahora envíe el texto.",
+  sendText: "Ahora envíe el texto. Puede usar:\n# Título\n## Subtítulo\nPárrafo.\n**Negrita**\n- Lista\n> Cita",
   previewTitle: "Vista previa",
   published: "Artículo publicado.",
   unpublished: "El artículo ya no es público.",
@@ -197,6 +281,48 @@ const es: BotCopy = {
   needsInfo: "Falta información",
   welcomeAdmin: "Abra el panel de administración o use el menú.",
   openPanel: "Abrir panel",
+  syntaxHelp: "# Título\n## Subtítulo\nPárrafo.\n**Negrita**\n- Lista\n> Cita",
+  profileNotFound: "Perfil no encontrado.",
+  profileApproved: "Perfil aprobado.",
+  profilePrivate: "El perfil permanece privado.",
+  profileHidden: "Perfil oculto.",
+  needInfoMarked: "Marcado como falta de información.",
+  noPhotos: "Aún no hay fotos.",
+  noProfiles: "Aún no hay perfiles.",
+  photoNotFound: "Foto no encontrada.",
+  photoAdded: "Foto añadida.",
+  photoAsk: "¿A qué perfil debe ir esta foto?",
+  photoSavedNew: "Guardé la foto. Cree un perfil en Mini App o envíe: New profile Maria",
+  createdNamed: "Creado. Foto añadida.",
+  lookingFor: "Busca",
+  newProfile: "NUEVO PERFIL",
+  btnOpen: "👁 Abrir",
+  btnApprove: "✅ Aprobar",
+  btnReject: "❌ Rechazar",
+  btnNeedInfo: "ℹ️ Pedir info",
+  btnHide: "🙈 Ocultar",
+  btnPhotos: "📸 Fotos",
+  btnAsk: "💬 Preguntar",
+  btnUse: "✅ Usar",
+  btnRejectPhoto: "❌ Rechazar",
+  articlePublished: "Artículo publicado.",
+  draftCancelled: "Borrador cancelado.",
+  draftNotFound: "Borrador no encontrado.",
+  translateReady: "Traducción guardada.",
+  translateFail: "La traducción no está disponible ahora. Inténtelo de nuevo.",
+  photoAddedProfile: "Foto añadida al perfil.",
+  inboxNothing: "No encontré esa foto.",
+  sendPhotoPlusText: "Envíe una foto y el texto para crear un borrador.",
+  notFound: "No encontrado.",
+  opened: "Abierto",
+  applicationLabel: "Solicitud",
+  mainPhoto: "Foto principal",
+  ready: "Listo",
+  added: "Añadido",
+  nothingToAdd: "Nada que añadir",
+  userWelcome: "Bienvenido a Tango Slavique. Abra Mini App para crear su perfil.",
+  openMiniApp: "Abrir Mini App",
+  untitled: "Sin título",
 };
 
 const ru: BotCopy = {
@@ -206,7 +332,7 @@ const ru: BotCopy = {
   blogCreate: "Создание нового блога",
   sendPhoto: "Отправьте фотографию. Чтобы сохранить исходное изображение, отправьте его как файл.",
   photoReceived: "Фото получено.\nТеперь отправьте текст.",
-  sendText: "Теперь отправьте текст.",
+  sendText: "Теперь отправьте текст. Можно так:\n# Заголовок\n## Подзаголовок\nАбзац.\n**Жирный**\n- Список\n> Цитата",
   previewTitle: "Предпросмотр",
   published: "Блог опубликован.",
   unpublished: "Запись больше не на сайте.",
@@ -259,7 +385,56 @@ const ru: BotCopy = {
   needsInfo: "Нужна информация",
   welcomeAdmin: "Откройте админ-панель или воспользуйтесь меню.",
   openPanel: "Открыть админ-панель",
+  syntaxHelp: "# Заголовок\n## Подзаголовок\nАбзац.\n**Жирный**\n- Список\n> Цитата",
+  profileNotFound: "Профиль не найден.",
+  profileApproved: "Профиль одобрен.",
+  profilePrivate: "Профиль остаётся закрытым.",
+  profileHidden: "Профиль скрыт.",
+  needInfoMarked: "Отмечено: нужна информация.",
+  noPhotos: "Фотографий пока нет.",
+  noProfiles: "Профилей пока нет.",
+  photoNotFound: "Фото не найдено.",
+  photoAdded: "Фото добавлено.",
+  photoAsk: "Какому профилю отправить это фото?",
+  photoSavedNew: "Фото сохранено. Создайте профиль в Mini App или напишите: New profile Maria",
+  createdNamed: "Создано. Фото добавлено.",
+  lookingFor: "Ищет",
+  newProfile: "НОВЫЙ ПРОФИЛЬ",
+  btnOpen: "👁 Открыть",
+  btnApprove: "✅ Одобрить",
+  btnReject: "❌ Отклонить",
+  btnNeedInfo: "ℹ️ Нужна информация",
+  btnHide: "🙈 Скрыть",
+  btnPhotos: "📸 Фото",
+  btnAsk: "💬 Спросить",
+  btnUse: "✅ Оставить",
+  btnRejectPhoto: "❌ Отклонить",
+  articlePublished: "Статья опубликована.",
+  draftCancelled: "Черновик отменён.",
+  draftNotFound: "Черновик не найден.",
+  translateReady: "Перевод сохранён.",
+  translateFail: "Перевод сейчас недоступен. Попробуйте позже.",
+  photoAddedProfile: "Фото добавлено в профиль.",
+  inboxNothing: "Это фото не найдено.",
+  sendPhotoPlusText: "Отправьте фото и текст, чтобы создать черновик.",
+  notFound: "Не найдено.",
+  opened: "Открыто",
+  applicationLabel: "Заявка",
+  mainPhoto: "Главное фото",
+  ready: "Готово",
+  added: "Добавлено",
+  nothingToAdd: "Нечего добавить",
+  userWelcome: "Добро пожаловать в Tango Slavique. Откройте Mini App, чтобы создать профиль.",
+  openMiniApp: "Открыть Mini App",
+  untitled: "Без названия",
 };
+
+export function localeFromTelegram(code?: string | null): AdminLocale {
+  const value = (code || "").toLowerCase();
+  if (value.startsWith("es")) return "es";
+  if (value.startsWith("ru")) return "ru";
+  return "en";
+}
 
 export const botCopy = { en, es, ru };
 

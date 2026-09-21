@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useLanguage } from "@/lib/i18n/LanguageProvider";
 import { WORKER_URL } from "@/lib/miniapp/api";
+import { parseArticleMarkdown } from "@/lib/blog/format";
+import { ArticleBody } from "@/components/blog/ArticleBody";
 
 export function BlogArticle({ slug }: { slug: string }) {
   const { locale } = useLanguage();
@@ -11,6 +13,10 @@ export function BlogArticle({ slug }: { slug: string }) {
   const [body, setBody] = useState("");
   const [cover, setCover] = useState("");
   const [missing, setMissing] = useState(false);
+  const parsed = useMemo(
+    () => parseArticleMarkdown([title, body].filter(Boolean).join("\n")),
+    [title, body]
+  );
 
   useEffect(() => {
     async function load() {
@@ -59,12 +65,12 @@ export function BlogArticle({ slug }: { slug: string }) {
             <img src={cover} alt="" className="mx-auto max-h-[70vh] w-full object-contain" />
           </div>
         ) : null}
-        <h1 className="mt-10 font-serif text-3xl text-white sm:text-4xl">{title || "…"}</h1>
-        <div className="mt-8 space-y-4 text-sm leading-relaxed text-ivory/75">
-          {body.split(/\n{2,}/).map((paragraph) => (
-            <p key={paragraph.slice(0, 24)}>{paragraph}</p>
-          ))}
-        </div>
+        <ArticleBody
+          className="mt-10"
+          title={parsed.title || title || "…"}
+          subtitle={parsed.subtitle}
+          blocks={parsed.blocks}
+        />
       </div>
     </main>
   );

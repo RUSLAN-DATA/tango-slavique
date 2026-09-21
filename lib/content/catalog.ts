@@ -1,4 +1,4 @@
-export type ContentPage = "home" | "about" | "how" | "contact" | "footer";
+export type ContentPage = "home" | "about" | "how" | "contact" | "footer" | "faq";
 export type SiteLocale = "en" | "es";
 
 export type ContentField = {
@@ -19,6 +19,7 @@ export const contentPages: {
   { id: "how", label: { en: "How it works", es: "Cómo funciona", ru: "Как это работает" } },
   { id: "contact", label: { en: "Contact", es: "Contacto", ru: "Контакт" } },
   { id: "footer", label: { en: "Footer", es: "Pie de página", ru: "Подвал" } },
+  { id: "faq", label: { en: "FAQ", es: "FAQ", ru: "FAQ" } },
 ];
 
 export const contentFields: ContentField[] = [
@@ -47,6 +48,16 @@ export const contentFields: ContentField[] = [
   { id: "contact.form.submit", page: "contact", section: "form", field: "submit", dictPath: "form.submit", label: { en: "Button", es: "Botón", ru: "Кнопка" } },
   { id: "footer.footer.tagline", page: "footer", section: "footer", field: "tagline", dictPath: "footer.tagline", label: { en: "Tagline", es: "Lema", ru: "Слоган" } },
   { id: "footer.footer.copyright", page: "footer", section: "footer", field: "copyright", dictPath: "footer.copyright", label: { en: "Copyright", es: "Copyright", ru: "Копирайт" } },
+  { id: "faq.faq.q1", page: "faq", section: "faq", field: "q1", dictPath: "pages.faq.items.0.question", label: { en: "Question 1", es: "Pregunta 1", ru: "Вопрос 1" } },
+  { id: "faq.faq.a1", page: "faq", section: "faq", field: "a1", dictPath: "pages.faq.items.0.answer", label: { en: "Answer 1", es: "Respuesta 1", ru: "Ответ 1" } },
+  { id: "faq.faq.q2", page: "faq", section: "faq", field: "q2", dictPath: "pages.faq.items.1.question", label: { en: "Question 2", es: "Pregunta 2", ru: "Вопрос 2" } },
+  { id: "faq.faq.a2", page: "faq", section: "faq", field: "a2", dictPath: "pages.faq.items.1.answer", label: { en: "Answer 2", es: "Respuesta 2", ru: "Ответ 2" } },
+  { id: "faq.faq.q3", page: "faq", section: "faq", field: "q3", dictPath: "pages.faq.items.2.question", label: { en: "Question 3", es: "Pregunta 3", ru: "Вопрос 3" } },
+  { id: "faq.faq.a3", page: "faq", section: "faq", field: "a3", dictPath: "pages.faq.items.2.answer", label: { en: "Answer 3", es: "Respuesta 3", ru: "Ответ 3" } },
+  { id: "faq.faq.q4", page: "faq", section: "faq", field: "q4", dictPath: "pages.faq.items.3.question", label: { en: "Question 4", es: "Pregunta 4", ru: "Вопрос 4" } },
+  { id: "faq.faq.a4", page: "faq", section: "faq", field: "a4", dictPath: "pages.faq.items.3.answer", label: { en: "Answer 4", es: "Respuesta 4", ru: "Ответ 4" } },
+  { id: "faq.faq.q5", page: "faq", section: "faq", field: "q5", dictPath: "pages.faq.items.4.question", label: { en: "Question 5", es: "Pregunta 5", ru: "Вопрос 5" } },
+  { id: "faq.faq.a5", page: "faq", section: "faq", field: "a5", dictPath: "pages.faq.items.4.answer", label: { en: "Answer 5", es: "Respuesta 5", ru: "Ответ 5" } },
 ];
 
 export function contentFieldById(id: string): ContentField | undefined {
@@ -134,6 +145,34 @@ export const contentDefaults: Record<string, { en: string; es: string }> = {
   "footer.copyright": {
     en: "© 2026 TangoSlavique. All rights reserved.",
     es: "© 2026 TangoSlavique. Todos los derechos reservados.",
+  },
+  "pages.faq.items.0.question": {
+    en: "Who is this service for?",
+    es: "¿Para quién es este servicio?",
+  },
+  "pages.faq.items.0.answer": {
+    en: "Tango Slavique is for men and women seeking a serious relationship. For men: residents of Spain and abroad who value authenticity, intention, and cultural depth. For women: with roots in Eastern Europe, established in Spain, who share these values.",
+    es: "Tango Slavique está pensado para hombres y mujeres que buscan una relación seria. Para hombres: españoles e internacionales que valoran la autenticidad, la intención y la riqueza cultural. Para mujeres: con raíces en Europa del Este, establecidas en España, que comparten estos valores.",
+  },
+  "pages.faq.items.1.question": { en: "How much does it cost?", es: "¿Cuánto cuesta?" },
+  "pages.faq.items.1.answer": {
+    en: "For men: a €1,000 enrollment fee and a €400 monthly payment, cancellable at any time. For women: complimentary registration during the promotional period; afterwards, a single payment of €50.",
+    es: "Para hombres: matrícula de 1.000 € y cuota mensual de 400 €, cancelable en cualquier momento. Para mujeres: inscripción gratuita durante el período promocional; después, un único pago de 50 €.",
+  },
+  "pages.faq.items.2.question": { en: "Are results guaranteed?", es: "¿Se garantizan resultados?" },
+  "pages.faq.items.2.answer": {
+    en: "For male clients, a set number of arranged meetings is guaranteed over twelve months. For women, participation does not guarantee an introduction: each presentation is selective, based on compatibility, timing, and fit within the private network.",
+    es: "Para los clientes masculinos se garantiza un número determinado de citas organizadas durante doce meses. Para las mujeres, la participación no garantiza una presentación: cada introducción es selectiva y depende de la compatibilidad, el momento y el encaje en la red privada.",
+  },
+  "pages.faq.items.3.question": { en: "How are introductions made?", es: "¿Cómo se hacen las presentaciones?" },
+  "pages.faq.items.3.answer": {
+    en: "The team reviews each profile in depth — values, way of life, preferences, and aims — and makes considered introductions by hand. There is no public catalogue and no open matching.",
+    es: "El equipo analiza cada perfil en profundidad — valores, estilo de vida, preferencias y objetivos — y realiza presentaciones a mano. No hay catálogo público ni emparejamiento abierto.",
+  },
+  "pages.faq.items.4.question": { en: "Are my details safe?", es: "¿Mis datos están seguros?" },
+  "pages.faq.items.4.answer": {
+    en: "Yes. Details are held confidentially. They are never shared with third parties without consent, except where the law expressly requires it. The club does not publish profiles or photographs.",
+    es: "Sí. Los datos se conservan de forma confidencial. Nunca se comparten con terceros sin consentimiento, salvo cuando la ley lo exija. El club no publica perfiles ni fotografías.",
   },
 };
 

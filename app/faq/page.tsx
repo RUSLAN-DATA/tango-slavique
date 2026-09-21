@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { StubPage } from "@/components/legal/StubPage";
+import { FaqList } from "@/components/faq/FaqList";
 
 export const metadata: Metadata = {
   title: "FAQ — Tango Slavique",
@@ -7,5 +7,5 @@ export const metadata: Metadata = {
 };
 
 export default function FaqPage() {
-  return <StubPage pageKey="faq" />;
+  return <FaqList />;
 }

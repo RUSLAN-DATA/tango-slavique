@@ -451,17 +451,62 @@ export function MiniAppShell() {
         ) : null}
 
         {tab === "alerts" ? (
-          alerts.length ? alerts.map((item) => (
-            <article key={item.id} className="border border-white/10 p-3 text-sm text-ivory/70">
-              {item.type === "application_approved" || item.type === "profile_approved" ? t.alertApproved
-                : item.type === "application_rejected" ? t.alertRejected
-                : item.type === "application_info_requested" ? t.alertInfo
-                : item.type === "match_new" || item.type === "introduction_new" ? t.alertMatch
-                : item.type.startsWith("photo_") ? t.alertPhoto
-                : item.type === "application_new" || item.type === "application_submitted" ? t.submitted
-                : item.type}
-            </article>
-          )) : <p className="text-ivory/60">{t.submitted}</p>
+          <div className="space-y-3">
+            {alerts.length ? (
+              <>
+                <button
+                  className={ghostBtn}
+                  type="button"
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusy(true);
+                    await workerRequest("/api/notifications/read-all", { method: "POST" });
+                    await refresh();
+                    setBusy(false);
+                  }}
+                >
+                  {t.markAll}
+                </button>
+                {alerts.map((item) => (
+                  <article key={item.id} className="border border-white/10 p-3 text-sm text-ivory/70">
+                    <p>
+                      {item.type === "application_approved" || item.type === "profile_approved"
+                        ? t.alertApproved
+                        : item.type === "application_rejected"
+                          ? t.alertRejected
+                          : item.type === "application_info_requested"
+                            ? t.alertInfo
+                            : item.type === "match_new" || item.type === "introduction_new"
+                              ? t.alertMatch
+                              : item.type.startsWith("photo_")
+                                ? t.alertPhoto
+                                : item.type === "application_new" || item.type === "application_submitted"
+                                  ? t.submitted
+                                  : item.type}
+                    </p>
+                    <p className="mt-1 text-[10px] uppercase text-gold">{item.status === "read" ? t.read : t.unread}</p>
+                    {item.status !== "read" ? (
+                      <button
+                        className={`${ghostBtn} mt-2`}
+                        type="button"
+                        disabled={busy}
+                        onClick={async () => {
+                          setBusy(true);
+                          await workerRequest(`/api/notifications/${item.id}/read`, { method: "POST" });
+                          await refresh();
+                          setBusy(false);
+                        }}
+                      >
+                        {t.markRead}
+                      </button>
+                    ) : null}
+                  </article>
+                ))}
+              </>
+            ) : (
+              <p className="text-ivory/60">{t.noAlerts}</p>
+            )}
+          </div>
         ) : null}
 
         {tab === "settings" ? (

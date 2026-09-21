@@ -3,6 +3,7 @@ import { geminiGenerateJson, textPart } from "../ai/gemini";
 import { newId, nowIso } from "../crypto";
 import { detectLocale, type SiteLocale } from "./language";
 import { sendAdminMessage } from "../telegram/notifications";
+import { copyFor, type AdminLocale } from "../telegram/cmsCopy";
 
 export type BlogArticle = {
   id: string;
@@ -35,49 +36,52 @@ function slugify(title: string): string {
   return `${base || "note"}-${newId().slice(0, 6)}`;
 }
 
-function blogKeyboard(id: string) {
+function blogKeyboard(id: string, locale: AdminLocale = "en") {
+  const t = copyFor(locale);
   return {
     inline_keyboard: [
       [
-        { text: "✏️ Edit", callback_data: `b:e:${id}` },
-        { text: "👁 Preview", callback_data: `b:v:${id}` },
+        { text: `✏️ ${t.edit}`, callback_data: `b:e:${id}` },
+        { text: `👁 ${t.preview}`, callback_data: `b:v:${id}` },
       ],
       [
-        { text: "🚀 Publish", callback_data: `b:p:${id}` },
-        { text: "❌ Cancel", callback_data: `b:c:${id}` },
+        { text: `🚀 ${t.publish}`, callback_data: `b:p:${id}` },
+        { text: `❌ ${t.cancel}`, callback_data: `b:c:${id}` },
       ],
     ],
   };
 }
 
-export function blogListKeyboard(id: string, status: string) {
+export function blogListKeyboard(id: string, status: string, locale: AdminLocale = "en") {
+  const t = copyFor(locale);
   const second =
     status === "published"
-      ? { text: "⏸ Unpublish", callback_data: `b:u:${id}` }
-      : { text: "🚀 Publish", callback_data: `b:p:${id}` };
+      ? { text: `⏸ ${t.unpublish}`, callback_data: `b:u:${id}` }
+      : { text: `🚀 ${t.publish}`, callback_data: `b:p:${id}` };
   return {
     inline_keyboard: [
       [
-        { text: "✏️ Edit", callback_data: `b:e:${id}` },
-        { text: "👁 Preview", callback_data: `b:v:${id}` },
+        { text: `✏️ ${t.edit}`, callback_data: `b:e:${id}` },
+        { text: `👁 ${t.preview}`, callback_data: `b:v:${id}` },
       ],
-      [second, { text: "🗑 Delete", callback_data: `b:d:${id}` }],
+      [second, { text: `🗑 ${t.delete}`, callback_data: `b:d:${id}` }],
     ],
   };
 }
 
-export function blogEditKeyboard(id: string) {
+export function blogEditKeyboard(id: string, locale: AdminLocale = "en") {
+  const t = copyFor(locale);
   return {
     inline_keyboard: [
       [
-        { text: "🇬🇧 English", callback_data: `b:en:${id}` },
-        { text: "🇪🇸 Spanish", callback_data: `b:es:${id}` },
+        { text: `🇬🇧 ${t.english}`, callback_data: `b:en:${id}` },
+        { text: `🇪🇸 ${t.spanish}`, callback_data: `b:es:${id}` },
       ],
       [
-        { text: "📝 Original", callback_data: `b:or:${id}` },
-        { text: "🖼 Photo", callback_data: `b:ph:${id}` },
+        { text: `📝 ${t.original}`, callback_data: `b:or:${id}` },
+        { text: `🖼 ${t.photo}`, callback_data: `b:ph:${id}` },
       ],
-      [{ text: "↩️ Back", callback_data: `b:v:${id}` }],
+      [{ text: `↩️ ${t.back}`, callback_data: `b:v:${id}` }],
     ],
   };
 }
@@ -316,10 +320,17 @@ export async function generateBlogLocale(
     env,
     [
       textPart(
-        `Translate this private matchmaking journal post into ${language}. Keep an elegant, discreet tone. Return JSON {"title","body","seo_title","seo_description"}.\n\nTitle: ${source.title}\n\n${source.body}`
+        `Translate this private matchmaking journal post into ${language}.
+Keep an elegant, discreet tone.
+Preserve markdown structure exactly: # headings, ## subheadings, **bold**, lines starting with - for lists, and > for quotes.
+Return JSON {"title","body","seo_title","seo_description"} where body keeps that markdown.
+
+Title: ${source.title}
+
+${source.body}`
       ),
     ],
-    "You translate journal essays for Tango Slavique. English and Spanish only."
+    "You translate journal essays for Tango Slavique. English and Spanish only. Preserve markdown headings, bold, lists and quotes."
   );
   if (!json) {
     return false;

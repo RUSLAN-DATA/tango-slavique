@@ -10,7 +10,8 @@ import { sendTelegramMessage } from "./api";
 import { sendAdminHub, sendPrivateAdminPanel, sendAdminMenu } from "./adminHub";
 import { isAdminPanelCommand, miniAppHttpsUrl } from "./miniAppLinks";
 import { handleCmsMessage } from "./cms";
-import { menuActionForText } from "./cmsCopy";
+import { telegramEntitiesToMarkdown } from "../../../lib/blog/format";
+import { copyFor, localeFromTelegram, menuActionForText } from "./cmsCopy";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -43,6 +44,13 @@ function getFromId(container: Record<string, unknown> | null): string | null {
   return asNumericId(container.from.id);
 }
 
+function getLanguageCode(container: Record<string, unknown> | null): string {
+  if (!container || !isRecord(container.from)) {
+    return "";
+  }
+  return typeof container.from.language_code === "string" ? container.from.language_code : "";
+}
+
 function getChatId(container: Record<string, unknown> | null): number | string | null {
   if (!container || !isRecord(container.chat)) {
     return null;
@@ -58,13 +66,21 @@ function getChatType(container: Record<string, unknown> | null): string | null {
 }
 
 function getMessageText(message: Record<string, unknown>): string {
-  if (typeof message.text === "string") {
-    return message.text;
-  }
-  if (typeof message.caption === "string") {
-    return message.caption;
-  }
-  return "";
+  const raw =
+    typeof message.text === "string"
+      ? message.text
+      : typeof message.caption === "string"
+        ? message.caption
+        : "";
+  const entities = Array.isArray(message.entities)
+    ? message.entities
+    : Array.isArray(message.caption_entities)
+      ? message.caption_entities
+      : [];
+  return telegramEntitiesToMarkdown(
+    raw,
+    entities.filter(isRecord) as Array<{ type?: string; offset?: number; length?: number }>
+  );
 }
 
 function isPrivateChat(chatType: string | null): boolean {
@@ -130,19 +146,21 @@ async function handleStart(
   chatId: number | string,
   admin: boolean,
   startParam?: string,
-  adminId?: string | null
+  adminId?: string | null,
+  languageCode?: string
 ): Promise<void> {
   if (admin && adminId) {
     await sendAdminMenu(env, chatId, adminId);
     return;
   }
+  const t = copyFor(localeFromTelegram(languageCode));
   await sendTelegramMessage(
     env,
     chatId,
-    "Welcome to Tango Slavique. Open Mini App to create your profile.",
+    t.userWelcome,
     {
       reply_markup: {
-        inline_keyboard: [[{ text: "Open Mini App", web_app: { url: miniAppUrl(env, startParam || undefined) } }]],
+        inline_keyboard: [[{ text: t.openMiniApp, web_app: { url: miniAppUrl(env, startParam || undefined) } }]],
       },
     }
   );
@@ -171,7 +189,7 @@ async function processUpdate(env: Env, update: unknown): Promise<void> {
     if (chatId !== null && isPrivateChat(chatType)) {
       const start = text.match(/^\/start(?:@\w+)?(?:\s+(\S+))?$/i);
       if (start) {
-        await handleStart(env, chatId, admin, start[1] || undefined, userId);
+        await handleStart(env, chatId, admin, start[1] || undefined, userId, getLanguageCode(message));
         return;
       }
       if (isAdminPanelCommand(text)) {

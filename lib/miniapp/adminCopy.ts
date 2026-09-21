@@ -153,6 +153,10 @@ const en = {
     drafts: "Draft",
     publishedLabel: "Published",
     unpublishedLabel: "Unpublished",
+    imageGuide:
+      "Recommended: 16:9 or 3:2 landscape, or portrait shown in full. Minimum 800px on the long side. JPEG, PNG or WEBP, up to 10 MB. Original is stored uncropped. Send as a file in Telegram to keep the original.",
+    syntax:
+      "Use # Heading, ## Subheading, **bold**, - lists and > quotes. The first line is the title.",
   },
   content: {
     title: "Website Content",
@@ -171,6 +175,9 @@ const en = {
     english: "English",
     spanish: "Spanish",
     placeholder: "New text",
+    current: "Current on the website",
+    draft: "Draft (not public)",
+    livePreview: "Preview",
   },
   empty: {
     applications: "No applications yet.",
@@ -185,6 +192,27 @@ const en = {
     users: "No users yet.",
     notes: "No notes yet.",
     content: "No website fields yet.",
+  },
+  notices: {
+    markRead: "Mark as read",
+    markAll: "Mark all as read",
+    unread: "Unread",
+    read: "Read",
+    explain:
+      "These are in-app alerts for applications, photos and introductions. Telegram send logs stay in history and are not mixed here.",
+    types: {
+      application_new: "New application",
+      application_submitted: "Application received",
+      application_approved: "Application approved",
+      application_rejected: "Application declined",
+      application_info_requested: "More information requested",
+      profile_approved: "Profile approved",
+      photo_approved: "Photo approved",
+      photo_rejected: "Photo needs a replacement",
+      photo_info_requested: "New photo requested",
+      match_new: "New introduction",
+      introduction_new: "Introduction arranged",
+    },
   },
   status: {
     new: "New",
@@ -355,6 +383,10 @@ export const adminCopy = {
       drafts: "Borrador",
       publishedLabel: "Publicado",
       unpublishedLabel: "Oculto",
+      imageGuide:
+        "Recomendado: 16:9 o 3:2 horizontal, o vertical a tamaño completo. Mínimo 800 px en el lado largo. JPEG, PNG o WEBP, hasta 10 MB. El original se guarda sin recortar. En Telegram, envíela como archivo.",
+      syntax:
+        "Use # Título, ## Subtítulo, **negrita**, - listas y > citas. La primera línea es el título.",
     },
     content: {
       title: "Contenido del sitio",
@@ -373,6 +405,9 @@ export const adminCopy = {
       english: "Inglés",
       spanish: "Español",
       placeholder: "Texto nuevo",
+      current: "Ahora en el sitio",
+      draft: "Borrador (no público)",
+      livePreview: "Vista previa",
     },
     empty: {
       applications: "Aún no hay solicitudes.",
@@ -387,6 +422,27 @@ export const adminCopy = {
       users: "Aún no hay usuarios.",
       notes: "Aún no hay notas.",
       content: "Aún no hay campos del sitio.",
+    },
+    notices: {
+      markRead: "Marcar como leído",
+      markAll: "Marcar todo como leído",
+      unread: "No leídos",
+      read: "Leídos",
+      explain:
+        "Avisos internos de solicitudes, fotos y presentaciones. Los envíos de Telegram quedan en el historial y no se mezclan aquí.",
+      types: {
+        application_new: "Nueva solicitud",
+        application_submitted: "Solicitud recibida",
+        application_approved: "Solicitud aprobada",
+        application_rejected: "Solicitud rechazada",
+        application_info_requested: "Se pidió más información",
+        profile_approved: "Perfil aprobado",
+        photo_approved: "Foto aprobada",
+        photo_rejected: "La foto necesita reemplazo",
+        photo_info_requested: "Se pidió una foto nueva",
+        match_new: "Nueva presentación",
+        introduction_new: "Presentación concertada",
+      },
     },
     status: {
       new: "Nueva",
@@ -554,6 +610,10 @@ export const adminCopy = {
       drafts: "Черновик",
       publishedLabel: "Опубликовано",
       unpublishedLabel: "Снято с публикации",
+      imageGuide:
+        "Рекомендуется: 16:9 или 3:2 альбом, или портрет целиком. Минимум 800 px по длинной стороне. JPEG, PNG или WEBP, до 10 МБ. Оригинал хранится без обрезки. В Telegram отправьте файлом.",
+      syntax:
+        "Используйте # Заголовок, ## Подзаголовок, **жирный**, - списки и > цитаты. Первая строка — название.",
     },
     content: {
       title: "Контент сайта",
@@ -572,6 +632,9 @@ export const adminCopy = {
       english: "Английский",
       spanish: "Испанский",
       placeholder: "Новый текст",
+      current: "Сейчас на сайте",
+      draft: "Черновик (не опубликован)",
+      livePreview: "Предпросмотр",
     },
     empty: {
       applications: "Заявок пока нет.",
@@ -586,6 +649,27 @@ export const adminCopy = {
       users: "Пользователей пока нет.",
       notes: "Заметок пока нет.",
       content: "Полей сайта пока нет.",
+    },
+    notices: {
+      markRead: "Отметить прочитанным",
+      markAll: "Отметить все прочитанными",
+      unread: "Непрочитанные",
+      read: "Прочитанные",
+      explain:
+        "Внутренние уведомления о заявках, фото и знакомствах. Журнал Telegram остаётся в истории и сюда не попадает.",
+      types: {
+        application_new: "Новая заявка",
+        application_submitted: "Заявка получена",
+        application_approved: "Заявка одобрена",
+        application_rejected: "Заявка отклонена",
+        application_info_requested: "Запрошена дополнительная информация",
+        profile_approved: "Профиль одобрен",
+        photo_approved: "Фото одобрено",
+        photo_rejected: "Нужно другое фото",
+        photo_info_requested: "Нужно новое фото",
+        match_new: "Новое знакомство",
+        introduction_new: "Знакомство назначено",
+      },
     },
     status: {
       new: "Новая",
@@ -617,4 +701,10 @@ export function statusLabel(t: AdminCopy, status?: string | null) {
   if (!status) return "—";
   const map = t.status as Record<string, string>;
   return map[status] || status.replace(/_/g, " ");
+}
+
+export function noticeLabel(t: AdminCopy, type?: string | null) {
+  if (!type) return "—";
+  const map = t.notices.types as Record<string, string>;
+  return map[type] || type.replace(/_/g, " ");
 }

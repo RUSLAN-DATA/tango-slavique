@@ -2,7 +2,6 @@
 
 import { motion } from "framer-motion";
 import { FormEvent, useState } from "react";
-import { useRouter } from "next/navigation";
 import { useLanguage } from "@/lib/i18n/LanguageProvider";
 import { cityKeys, type CityKey } from "@/components/quiz/quizTypes";
 import { writeScreening } from "@/lib/screening";
@@ -18,7 +17,6 @@ export function GenderedApplicationForm({
   track,
 }: GenderedApplicationFormProps) {
   const { t } = useLanguage();
-  const router = useRouter();
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [age, setAge] = useState("");
@@ -29,6 +27,7 @@ export function GenderedApplicationForm({
   );
   const [privacy, setPrivacy] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const [sent, setSent] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -67,20 +66,23 @@ export function GenderedApplicationForm({
         | { success?: boolean }
         | null;
       if (!response.ok || !payload?.success) {
-        setSubmitError("Application could not be saved. Please try again.");
+        setSubmitError(t.form.submitError);
         return;
       }
     } catch {
-      setSubmitError("Application could not be saved. Please try again.");
+      setSubmitError(t.form.submitError);
       return;
     }
 
-    const role = track === "men" ? "MAN" : "WOMAN";
-    const next = track === "men" ? "/apply/men/form" : "/apply/women/form";
-    router.push(`/register?role=${role}&next=${encodeURIComponent(next)}`);
+    setSent(true);
   }
 
-  return (
+  return sent ? (
+    <div className="space-y-5 text-center">
+      <p className="text-[11px] uppercase tracking-[0.18em] text-gold">{t.form.successTitle}</p>
+      <p className="text-base font-light leading-relaxed text-ivory-muted">{t.form.successText}</p>
+    </div>
+  ) : (
     <>
       <form onSubmit={handleSubmit} className="space-y-5">
         <label className="block">

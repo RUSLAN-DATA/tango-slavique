@@ -296,6 +296,33 @@ export const dictionaries = {
         eyebrow: "FAQ",
         title: "Questions of admission",
         body: "Tango Slavique is a closed club. Admission is by application, followed by verification and a personal conversation with the team. For further questions, please write through the contact form.",
+        items: [
+          {
+            question: "Who is this service for?",
+            answer:
+              "Tango Slavique is for men and women seeking a serious relationship. For men: residents of Spain and abroad who value authenticity, intention, and cultural depth. For women: with roots in Eastern Europe, established in Spain, who share these values.",
+          },
+          {
+            question: "How much does it cost?",
+            answer:
+              "For men: a €1,000 enrollment fee and a €400 monthly payment, cancellable at any time. For women: complimentary registration during the promotional period; afterwards, a single payment of €50.",
+          },
+          {
+            question: "Are results guaranteed?",
+            answer:
+              "For male clients, a set number of arranged meetings is guaranteed over twelve months. For women, participation does not guarantee an introduction: each presentation is selective, based on compatibility, timing, and fit within the private network.",
+          },
+          {
+            question: "How are introductions made?",
+            answer:
+              "The team reviews each profile in depth — values, way of life, preferences, and aims — and makes considered introductions by hand. There is no public catalogue and no open matching.",
+          },
+          {
+            question: "Are my details safe?",
+            answer:
+              "Yes. Details are held confidentially. They are never shared with third parties without consent, except where the law expressly requires it. The club does not publish profiles or photographs.",
+          },
+        ],
       },
       terms: {
         eyebrow: "Legal",
@@ -653,6 +680,33 @@ export const dictionaries = {
         eyebrow: "FAQ",
         title: "Preguntas de admisión",
         body: "Tango Slavique es un club cerrado. El ingreso es por solicitud, seguida de verificación y una conversación personal con el equipo. Para más preguntas, escriba a través del formulario de contacto.",
+        items: [
+          {
+            question: "¿Para quién es este servicio?",
+            answer:
+              "Tango Slavique está pensado para hombres y mujeres que buscan una relación seria. Para hombres: españoles e internacionales que valoran la autenticidad, la intención y la riqueza cultural. Para mujeres: con raíces en Europa del Este, establecidas en España, que comparten estos valores.",
+          },
+          {
+            question: "¿Cuánto cuesta?",
+            answer:
+              "Para hombres: matrícula de 1.000 € y cuota mensual de 400 €, cancelable en cualquier momento. Para mujeres: inscripción gratuita durante el período promocional; después, un único pago de 50 €.",
+          },
+          {
+            question: "¿Se garantizan resultados?",
+            answer:
+              "Para los clientes masculinos se garantiza un número determinado de citas organizadas durante doce meses. Para las mujeres, la participación no garantiza una presentación: cada introducción es selectiva y depende de la compatibilidad, el momento y el encaje en la red privada.",
+          },
+          {
+            question: "¿Cómo se hacen las presentaciones?",
+            answer:
+              "El equipo analiza cada perfil en profundidad — valores, estilo de vida, preferencias y objetivos — y realiza presentaciones a mano. No hay catálogo público ni emparejamiento abierto.",
+          },
+          {
+            question: "¿Mis datos están seguros?",
+            answer:
+              "Sí. Los datos se conservan de forma confidencial. Nunca se comparten con terceros sin consentimiento, salvo cuando la ley lo exija. El club no publica perfiles ni fotografías.",
+          },
+        ],
       },
       terms: {
         eyebrow: "Legal",

@@ -19,7 +19,10 @@ describe("admin panel i18n", () => {
     expect(adminCopy.ru.status.draft).toBe("Черновик");
     expect(adminCopy.en.filters.pending).toBe("Pending");
     expect(adminCopy.ru.filters.needInfo).toBe("Нужна информация");
-    expect(adminCopy.es.nav.settings).toBe("Ajustes");
+    expect(adminCopy.ru.notices.markAll).toBe("Отметить все прочитанными");
+    expect(adminCopy.es.blog.imageGuide).toContain("JPEG");
+    expect(miniCopy.ru.noAlerts).toBe("Пока нет уведомлений.");
+    expect(miniCopy.es.markRead).toBe("Marcar como leído");
   });
 
   it("does not translate user-generated values", () => {

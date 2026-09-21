@@ -20,7 +20,7 @@ import {
   setPrimaryPhoto,
 } from "./photos/service";
 import { overridePhotoReview, reviewUserPhoto } from "./photos/review";
-import { notifyUser } from "./notifications/service";
+import { notifyUser, listInAppNotifications, markNotificationRead, markAllNotificationsRead } from "./notifications/service";
 import { newId, nowIso } from "./crypto";
 import { sendAdminMessage } from "./telegram/notifications";
 import { notifyNewProfile } from "./telegram/profileCards";
@@ -873,16 +873,28 @@ export async function handleApi(
   if (path === "/api/notifications" && method === "GET") {
     return wrap(async () => {
       const user = await requireUser(env, request);
-      const rows = isAdminUser(env, user)
-        ? await env.DB.prepare(
-            "SELECT id, channel, type, status, created_at FROM notifications ORDER BY created_at DESC LIMIT 50"
-          ).all()
-        : await env.DB.prepare(
-            "SELECT id, channel, type, status, created_at FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 50"
-          )
-            .bind(user.id)
-            .all();
-      return apiOk({ items: rows.results || [] });
+      const status = url.searchParams.get("status") || undefined;
+      const items = isAdminUser(env, user)
+        ? await listInAppNotifications(env, null, status)
+        : await listInAppNotifications(env, user.id, status);
+      return apiOk({ items });
+    });
+  }
+
+  if (path === "/api/notifications/read-all" && method === "POST") {
+    return wrap(async () => {
+      const user = await requireUser(env, request);
+      await markAllNotificationsRead(env, isAdminUser(env, user) ? null : user.id);
+      return apiOk({ ok: true });
+    });
+  }
+
+  const notificationRead = path.match(/^\/api\/notifications\/([a-f0-9]+)\/read$/);
+  if (notificationRead && method === "POST") {
+    return wrap(async () => {
+      const user = await requireUser(env, request);
+      await markNotificationRead(env, notificationRead[1], isAdminUser(env, user) ? null : user.id);
+      return apiOk({ ok: true });
     });
   }
 

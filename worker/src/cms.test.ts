@@ -16,6 +16,7 @@ import {
   createBlogDraft,
 } from "./blog/service";
 import { createApplication, listApplications, updateApplicationStatus } from "./applications/service";
+import { notifyUser, listInAppNotifications, markNotificationRead, markAllNotificationsRead } from "./notifications/service";
 import { menuActionForText } from "./telegram/cmsCopy";
 import {
   saveContentDraft,
@@ -235,7 +236,9 @@ function runSql(store: Record<string, Row[]>, sql: string, params: unknown[]): R
         const translation = store.blog_translations.find(
           (item) => item.article_id === article.id && item.locale === params[0]
         );
-        return translation ? { ...article, ...translation } : null;
+        return translation
+          ? { ...article, title: translation.title, body: translation.body, locale: translation.locale }
+          : { ...article };
       })
       .filter(Boolean) as Row[];
   }
@@ -392,6 +395,16 @@ function runSql(store: Record<string, Row[]>, sql: string, params: unknown[]): R
     return [...store.applications];
   }
   if (lower.startsWith("update applications set status")) {
+    if (lower.includes("message")) {
+      for (const row of store.applications) {
+        if (row.id === params[2]) {
+          row.status = "new";
+          row.message = params[0];
+          row.updated_at = params[1];
+        }
+      }
+      return [];
+    }
     for (const row of store.applications) {
       if (row.id === params[2] || row.user_id === params[1]) {
         if (lower.includes("where id = ?")) {
@@ -419,15 +432,93 @@ function runSql(store: Record<string, Row[]>, sql: string, params: unknown[]): R
     return [];
   }
   if (lower.startsWith("insert into notifications")) {
-    store.notifications.push({
-      id: params[0],
-      user_id: params[1],
-      channel: "in_app",
-      type: params[2],
-      payload: params[3],
-      status: params[4] || "unread",
-      created_at: params[5] || params[4],
-    });
+    if (lower.includes("'in_app'")) {
+      store.notifications.push({
+        id: params[0],
+        user_id: params[1],
+        channel: "in_app",
+        type: params[2],
+        payload: params[3],
+        status: "unread",
+        created_at: params[4],
+      });
+    } else {
+      store.notifications.push({
+        id: params[0],
+        user_id: null,
+        channel: "telegram",
+        type: "application_new",
+        payload: params[1],
+        status: params[2],
+        created_at: params[3],
+      });
+    }
+    return [];
+  }
+  if (lower.includes("from notifications") && lower.includes("select")) {
+    let rows = store.notifications.filter((item) => item.channel === "in_app");
+    if (lower.includes("user_id = ?") && lower.includes("type = ?")) {
+      return rows.filter(
+        (item) =>
+          item.user_id === params[0] &&
+          item.type === params[1] &&
+          item.status !== "archived" &&
+          String(item.created_at) >= String(params[2])
+      );
+    }
+    if (lower.includes("user_id = ?")) {
+      rows = rows.filter((item) => item.user_id === params[0]);
+    }
+    if (lower.includes("and status = ?")) {
+      const wanted = lower.includes("user_id = ?") ? params[1] : params[0];
+      rows = rows.filter((item) => item.status === wanted);
+    }
+    if (lower.includes("status != 'archived'")) {
+      rows = rows.filter((item) => item.status !== "archived");
+    }
+    return rows;
+  }
+  if (lower.startsWith("update notifications set status = 'read'")) {
+    for (const row of store.notifications) {
+      if (row.channel !== "in_app") continue;
+      if (lower.includes("where id = ? and user_id = ?")) {
+        if (row.id === params[0] && row.user_id === params[1]) row.status = "read";
+      } else if (lower.includes("where id = ?")) {
+        if (row.id === params[0]) row.status = "read";
+      } else if (lower.includes("where user_id = ?")) {
+        if (row.user_id === params[0] && row.status === "unread") row.status = "read";
+      } else if (row.status === "unread") {
+        row.status = "read";
+      }
+    }
+    return [];
+  }
+  if (lower.includes("from users where id = ?")) {
+    return store.users.filter((item) => item.id === params[0]);
+  }
+  if (lower.includes("from profiles where user_id")) {
+    return store.profiles.filter((item) => item.user_id === params[0] || item.id === params[0]);
+  }
+  if (lower.startsWith("update profiles set status")) {
+    for (const row of store.profiles) {
+      if (row.user_id === params[1]) {
+        row.status = "pending";
+        row.updated_at = params[0];
+      }
+    }
+    return [];
+  }
+  if (lower.includes("from photos where user_id")) {
+    return store.photos.filter((item) => item.user_id === params[0]);
+  }
+  if (lower.startsWith("update applications set status = 'new', message")) {
+    for (const row of store.applications) {
+      if (row.id === params[2]) {
+        row.status = "new";
+        row.message = params[0];
+        row.updated_at = params[1];
+      }
+    }
     return [];
   }
   if (lower.includes("from partner_preferences where user_id = ?")) {
@@ -844,5 +935,115 @@ describe("blog cover bytes", () => {
     expect(stored).toBeTruthy();
     const storedBytes = new Uint8Array((await stored!.arrayBuffer()) as ArrayBuffer);
     expect(Array.from(storedBytes)).toEqual(Array.from(new Uint8Array(bytes)));
+  });
+});
+
+describe("registration applications", () => {
+  it("accepts a public website registration into D1", async () => {
+    const env = createMemoryEnv();
+    const response = await handleApi(
+      new Request("https://example.com/api/applications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Elena",
+          phone: "+34600000000",
+          city: "Madrid",
+          lookingFor: "man",
+          source: "website",
+        }),
+      }),
+      env,
+      "/api/applications"
+    );
+    expect(response?.status).toBe(200);
+    const body = (await response?.json()) as { data?: { id?: string; status?: string } };
+    expect(body.data?.status).toBe("new");
+    expect(env.store.applications).toHaveLength(1);
+    expect(env.store.applications[0]?.name).toBe("Elena");
+  });
+
+  it("returns an existing needs-information application to pending on resubmit", async () => {
+    const env = createMemoryEnv();
+    const user = envHasUser(env, "42");
+    env.store.profiles.push({
+      id: "p42",
+      user_id: user.id,
+      first_name: "Maria",
+      city: "Madrid",
+      about: "Updated city and photos",
+      status: "pending",
+    });
+    env.store.photos.push({
+      id: "ph42",
+      user_id: user.id,
+      r2_key: "photos/a.jpg",
+      mime_type: "image/jpeg",
+      sort_order: 0,
+    });
+    const created = await createApplication(env, {
+      name: "Maria",
+      email: "",
+      phone: "",
+      city: "Madrid",
+      message: "Hello",
+      source: "miniapp",
+      userId: String(user.id),
+      silent: true,
+    });
+    await updateApplicationStatus(env, created.application.id, "info_requested", "1881305255", "Please add a city.");
+    const resubmit = await adminRequest(env, "/api/profile/submit", { method: "POST", body: "{}" }, "42");
+    expect(resubmit?.status).toBe(200);
+    expect(env.store.applications).toHaveLength(1);
+    expect(env.store.applications[0]?.status).toBe("new");
+    expect(env.store.applications[0]?.id).toBe(created.application.id);
+  });
+});
+
+describe("in-app notifications", () => {
+  it("marks one and all as read and skips duplicate events", async () => {
+    const env = createMemoryEnv();
+    const user = envHasUser(env, "42");
+    await notifyUser(env, String(user.id), "application_submitted");
+    await notifyUser(env, String(user.id), "application_submitted");
+    const unread = await listInAppNotifications(env, String(user.id), "unread");
+    expect(unread).toHaveLength(1);
+    await markNotificationRead(env, String(unread[0]?.id), String(user.id));
+    expect(await listInAppNotifications(env, String(user.id), "unread")).toHaveLength(0);
+    expect(await listInAppNotifications(env, String(user.id), "read")).toHaveLength(1);
+    await notifyUser(env, String(user.id), "application_approved");
+    await markAllNotificationsRead(env, String(user.id));
+    expect(await listInAppNotifications(env, String(user.id), "unread")).toHaveLength(0);
+    const listed = await listInAppNotifications(env, String(user.id));
+    expect(listed.every((item) => item.status === "read")).toBe(true);
+    expect(listed.every((item) => item.channel === "in_app")).toBe(true);
+  });
+});
+
+describe("blog structured formatting", () => {
+  it("keeps markdown structure on create, draft, publish and unpublish", async () => {
+    const env = createMemoryEnv();
+    const markdown = [
+      "A considered house",
+      "## Why discretion",
+      "# The interview",
+      "A **private** introduction.",
+      "- Verified profiles",
+      "> Taste over volume",
+    ].join("\n");
+    const first = await createBlogDraft(env, { text: markdown, skipTranslate: true, silent: true });
+    const second = await createBlogDraft(env, { text: "Second evening\nAnother night.", skipTranslate: true, silent: true });
+    expect(env.store.blog_articles).toHaveLength(2);
+    expect(String(env.store.blog_articles.find((item) => item.id === first.id)?.original_text)).toContain("**private**");
+    expect(env.store.blog_translations.find((item) => item.article_id === first.id)?.body).toContain("# The interview");
+    expect((await listPublishedBlog(env, "en")).length).toBe(0);
+    await publishArticle(env, first.id);
+    const live = await listPublishedBlog(env, "en");
+    expect(live.some((item) => String((item as { id: string }).id) === first.id)).toBe(true);
+    expect(live.some((item) => String((item as { id: string }).id) === second.id)).toBe(false);
+    await unpublishArticle(env, first.id);
+    expect((await listPublishedBlog(env, "en")).length).toBe(0);
+    expect(env.store.blog_articles.find((item) => item.id === first.id)?.status).toBe("unpublished");
+    expect(env.store.blog_articles.find((item) => item.id === second.id)?.status).toBe("draft");
   });
 });

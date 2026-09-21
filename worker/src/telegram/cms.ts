@@ -40,10 +40,11 @@ export async function sendBlogPreview(
   articleId: string,
   adminId?: string
 ) {
-  const t = copyFor(adminId ? await localeForAdmin(env, adminId) : "en");
+  const locale = adminId ? await localeForAdmin(env, adminId) : "en";
+  const t = copyFor(locale);
   const bundle = await articleWithTranslations(env, articleId);
   if (!bundle) {
-    await reply(env, chatId, "Draft not found.");
+    await reply(env, chatId, t.draftNotFound);
     return;
   }
   const en = bundle.translations.find((row) => row.locale === "en");
@@ -59,7 +60,7 @@ export async function sendBlogPreview(
   const keyboard = {
     reply_markup:
       bundle.article.status === "published"
-        ? blogListKeyboard(articleId, bundle.article.status)
+        ? blogListKeyboard(articleId, bundle.article.status, locale)
         : {
             inline_keyboard: [
               [
@@ -106,7 +107,8 @@ export async function listBlogsCommand(
   chatId: number | string,
   offset = 0
 ) {
-  const t = copyFor(await localeForAdmin(env, adminId));
+  const locale = await localeForAdmin(env, adminId);
+  const t = copyFor(locale);
   const items = await listBlogDrafts(env);
   if (!items.length) {
     await reply(env, chatId, `${t.listTitle}\n${t.emptyBlog}`, {
@@ -126,7 +128,7 @@ export async function listBlogsCommand(
         : row.status === "unpublished"
           ? t.unpublish
           : t.pending;
-    return `${offset + index + 1}. ${row.title || "Untitled"} — ${label}`;
+    return `${offset + index + 1}. ${row.title || t.untitled} — ${label}`;
   });
   const buttons: Array<Array<{ text: string; callback_data: string }>> = [
     [{ text: `➕ ${t.newBlog}`, callback_data: "b:n" }],
@@ -139,8 +141,8 @@ export async function listBlogsCommand(
   });
   for (const item of page) {
     const row = item as { id: string; title?: string; status: string };
-    await reply(env, chatId, `${row.title || "Untitled"}`, {
-      reply_markup: blogListKeyboard(row.id, row.status),
+    await reply(env, chatId, `${row.title || t.untitled}`, {
+      reply_markup: blogListKeyboard(row.id, row.status, locale),
     });
   }
 }
@@ -339,7 +341,8 @@ export async function handleCmsCallback(
   chatId: number | string,
   data: string
 ): Promise<boolean> {
-  const t = copyFor(await localeForAdmin(env, adminId));
+  const locale = await localeForAdmin(env, adminId);
+  const t = copyFor(locale);
   if (data === "b:n") {
     await startBlogCreate(env, adminId, chatId);
     return true;
@@ -390,7 +393,7 @@ export async function handleCmsCallback(
     }
     if (action === "e") {
       await setWorkflow(env, adminId, { workflow: "BLOG_EDIT", step: "BLOG_EDIT_MENU", draftId: id });
-      await reply(env, chatId, `✏️ ${t.editWhat}`, { reply_markup: blogEditKeyboard(id) });
+      await reply(env, chatId, `✏️ ${t.editWhat}`, { reply_markup: blogEditKeyboard(id, locale) });
       return true;
     }
     if (action === "en") {

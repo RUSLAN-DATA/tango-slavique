@@ -2,7 +2,6 @@
 
 import { motion } from "framer-motion";
 import { FormEvent, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Container } from "@/components/ui/Container";
 import { FadeIn } from "@/components/ui/FadeIn";
 import { GlowCard } from "@/components/ui/GlowCard";
@@ -50,9 +49,9 @@ export function ContactForm({
   lookingForPreset = null,
 }: ContactFormProps) {
   const { t } = useLanguage();
-  const router = useRouter();
   const [form, setForm] = useState<FormState>(initialState);
   const [submitError, setSubmitError] = useState("");
+  const [sent, setSent] = useState(false);
 
   useEffect(() => {
     if (!quizResult) {
@@ -92,7 +91,6 @@ export function ContactForm({
     event.preventDefault();
     setSubmitError("");
     const role = form.lookingFor === "man" ? "MAN" : "WOMAN";
-    const next = role === "MAN" ? "/apply/men/form" : "/apply/women/form";
     writeScreening({
       name: form.name.trim(),
       phone: form.phone.trim(),
@@ -122,14 +120,14 @@ export function ContactForm({
         | { success?: boolean }
         | null;
       if (!response.ok || !payload?.success) {
-        setSubmitError("Application could not be saved. Please try again.");
+        setSubmitError(t.form.submitError);
         return;
       }
     } catch {
-      setSubmitError("Application could not be saved. Please try again.");
+      setSubmitError(t.form.submitError);
       return;
     }
-    router.push(`/register?role=${role}&next=${encodeURIComponent(next)}`);
+    setSent(true);
   }
 
   return (
@@ -144,6 +142,15 @@ export function ContactForm({
         </FadeIn>
 
         <GlowCard className="mx-auto mt-14 max-w-xl bg-transparent p-6 sm:p-10">
+          {sent ? (
+            <div className="space-y-5 text-center">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-gold">{t.form.successTitle}</p>
+              <p className="text-base font-light leading-relaxed text-ivory-muted">{t.form.successText}</p>
+              <a href="/" className="inline-block text-[11px] uppercase tracking-[0.18em] text-gold">
+                {t.form.successReturn}
+              </a>
+            </div>
+          ) : (
           <motion.form
                 key="form"
                 initial={{ opacity: 0 }}
@@ -350,6 +357,7 @@ export function ContactForm({
                   {t.platform.screening.continue}
                 </motion.button>
               </motion.form>
+          )}
         </GlowCard>
       </Container>
     </section>
