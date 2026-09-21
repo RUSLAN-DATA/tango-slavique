@@ -382,6 +382,21 @@ function runSql(store: Record<string, Row[]>, sql: string, params: unknown[]): R
     store.applications.push(row);
     return [row];
   }
+  if (lower.includes("from applications") && lower.includes("status in ('new', 'info_requested', 'approved')")) {
+    const reusable = store.applications.filter(
+      (item) => item.status === "new" || item.status === "info_requested" || item.status === "approved"
+    );
+    if (lower.includes("user_id = ?")) {
+      return reusable.filter((item) => item.user_id === params[0]);
+    }
+    const email = String(params[0] || "").toLowerCase();
+    const phone = String(params[2] || "").replace(/\D/g, "");
+    return reusable.filter((item) => {
+      const itemEmail = String(item.email || "").toLowerCase();
+      const itemPhone = String(item.phone || "").replace(/\D/g, "");
+      return (email && itemEmail === email) || (phone && itemPhone === phone);
+    });
+  }
   if (lower.includes("from applications where id = ?")) {
     return store.applications.filter((item) => item.id === params[0]);
   }
@@ -961,6 +976,80 @@ describe("registration applications", () => {
     expect(body.data?.status).toBe("new");
     expect(env.store.applications).toHaveLength(1);
     expect(env.store.applications[0]?.name).toBe("Elena");
+  });
+
+  it("reuses a pending website application with the same email", async () => {
+    const env = createMemoryEnv();
+    const first = await handleApi(
+      new Request("https://example.com/api/applications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          firstName: "Regtest",
+          lastName: "Cursor",
+          email: "regtest.reuse@example.invalid",
+          source: "website",
+        }),
+      }),
+      env,
+      "/api/applications"
+    );
+    const second = await handleApi(
+      new Request("https://example.com/api/applications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          firstName: "Regtest",
+          lastName: "Cursor",
+          email: "regtest.reuse@example.invalid",
+          source: "website",
+        }),
+      }),
+      env,
+      "/api/applications"
+    );
+    const firstBody = (await first?.json()) as { data?: { id?: string; reused?: boolean } };
+    const secondBody = (await second?.json()) as { data?: { id?: string; reused?: boolean } };
+    expect(first?.status).toBe(200);
+    expect(second?.status).toBe(200);
+    expect(secondBody.data?.id).toBe(firstBody.data?.id);
+    expect(secondBody.data?.reused).toBe(true);
+    expect(env.store.applications).toHaveLength(1);
+  });
+
+  it("keeps a rejected application and creates a new one", async () => {
+    const env = createMemoryEnv();
+    const created = await createApplication(env, {
+      name: "Rejected Applicant",
+      email: "rejected.reuse@example.invalid",
+      phone: "",
+      city: "Madrid",
+      message: "Hello",
+      source: "website",
+      silent: true,
+    });
+    await updateApplicationStatus(env, created.application.id, "rejected", "1881305255");
+    const again = await handleApi(
+      new Request("https://example.com/api/applications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Rejected Applicant",
+          email: "rejected.reuse@example.invalid",
+          source: "website",
+        }),
+      }),
+      env,
+      "/api/applications"
+    );
+    const body = (await again?.json()) as { data?: { id?: string; reused?: boolean } };
+    expect(again?.status).toBe(200);
+    expect(body.data?.id).not.toBe(created.application.id);
+    expect(body.data?.reused).toBeFalsy();
+    expect(env.store.applications).toHaveLength(2);
+    expect(env.store.applications.find((item) => item.id === created.application.id)?.status).toBe(
+      "rejected"
+    );
   });
 
   it("returns an existing needs-information application to pending on resubmit", async () => {

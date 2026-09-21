@@ -19,7 +19,14 @@ function asText(value: unknown, max = MAX_TEXT): string {
 export function validateApplicationInput(
   body: Record<string, unknown>
 ): PublicApplicationInput | { error: string } {
-  const name = asText(body.name || body.contact, 120);
+  const name = asText(
+    body.name ||
+      body.contact ||
+      [body.firstName, body.lastName]
+        .filter((item) => typeof item === "string" && item.trim())
+        .join(" "),
+    120
+  );
   const email = asText(body.email, 160);
   const phone = asText(body.phone || body.whatsapp, 40);
   const city = asText(body.city, 80);

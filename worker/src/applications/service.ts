@@ -32,6 +32,46 @@ function applicationKeyboard(env: Env, id: string) {
   return applicationActionKeyboard(env, id);
 }
 
+function phoneDigits(value: string) {
+  return value.replace(/\D/g, "");
+}
+
+export async function findReusableApplication(
+  env: Env,
+  input: { email?: string; phone?: string; userId?: string | null }
+): Promise<ApplicationRow | null> {
+  if (input.userId) {
+    const byUser = await env.DB.prepare(
+      `SELECT * FROM applications
+       WHERE user_id = ? AND status IN ('new', 'info_requested', 'approved')
+       ORDER BY created_at DESC LIMIT 1`
+    )
+      .bind(input.userId)
+      .first<ApplicationRow>();
+    if (byUser) {
+      return byUser;
+    }
+  }
+
+  const email = (input.email || "").trim().toLowerCase();
+  const phone = phoneDigits(input.phone || "");
+  if (!email && !phone) {
+    return null;
+  }
+
+  return env.DB.prepare(
+    `SELECT * FROM applications
+     WHERE status IN ('new', 'info_requested', 'approved')
+       AND (
+         (? != '' AND lower(coalesce(email, '')) = ?)
+         OR (? != '' AND replace(replace(replace(coalesce(phone, ''), ' ', ''), '-', ''), '+', '') = ?)
+       )
+     ORDER BY created_at DESC LIMIT 1`
+  )
+    .bind(email, email, phone, phone)
+    .first<ApplicationRow>();
+}
+
 async function applicationNotice(env: Env, row: ApplicationRow): Promise<string> {
   let age = "";
   let photoCount = 0;
@@ -74,10 +114,27 @@ export async function createApplication(
     userId?: string | null;
     silent?: boolean;
   }
-): Promise<{ application: ApplicationRow; notified: boolean }> {
+): Promise<{ application: ApplicationRow; notified: boolean; reused: boolean }> {
+  const existing = await findReusableApplication(env, {
+    email: input.email,
+    phone: input.phone,
+    userId: input.userId,
+  });
+  if (existing) {
+    console.log("applications.reuse", {
+      id: existing.id,
+      status: existing.status,
+      source: input.source || "website",
+      hasEmail: Boolean(input.email),
+      hasPhone: Boolean(input.phone),
+    });
+    return { application: existing, notified: false, reused: true };
+  }
+
   const now = nowIso();
   const id = newId();
-  await env.DB.prepare(
+  try {
+    await env.DB.prepare(
     `INSERT INTO applications
       (id, user_id, name, email, phone, city, message, source, status, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?)`
@@ -95,6 +152,15 @@ export async function createApplication(
       now
     )
     .run();
+  } catch (error) {
+    console.error("applications.insert_failed", {
+      source: input.source || "website",
+      hasEmail: Boolean(input.email),
+      hasPhone: Boolean(input.phone),
+      hasCity: Boolean(input.city),
+    });
+    throw error;
+  }
 
   const application = (await env.DB.prepare(
     "SELECT * FROM applications WHERE id = ?"
@@ -102,9 +168,18 @@ export async function createApplication(
     .bind(id)
     .first<ApplicationRow>())!;
 
+  console.log("applications.create", {
+    id: application.id,
+    status: application.status,
+    source: input.source || "website",
+    hasEmail: Boolean(input.email),
+    hasPhone: Boolean(input.phone),
+    hasCity: Boolean(input.city),
+  });
+
   let notified = false;
   if (input.silent) {
-    return { application, notified };
+    return { application, notified, reused: false };
   }
   try {
     notified = await sendAdminMessage(env, await applicationNotice(env, application), {
@@ -131,7 +206,7 @@ export async function createApplication(
     notified = false;
   }
 
-  return { application, notified };
+  return { application, notified, reused: false };
 }
 
 export async function getApplication(

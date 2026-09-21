@@ -137,7 +137,7 @@ export async function handleApi(
           )
         );
       }
-      console.error("API error");
+      console.error("API error", path, method);
       return withCors(
         apiError("INTERNAL_ERROR", "Something went wrong. Please try again.", 500)
       );
@@ -276,11 +276,17 @@ export async function handleApi(
       } catch {
         userId = undefined;
       }
-      const result = await createApplication(env, { ...input, userId });
+      let result;
+      try {
+        result = await createApplication(env, { ...input, userId });
+      } catch {
+        return apiError("INTERNAL_ERROR", "The application could not be saved.", 500);
+      }
       return apiOk({
         id: result.application.id,
         status: result.application.status,
         notified: result.notified,
+        reused: result.reused,
       });
     });
   }

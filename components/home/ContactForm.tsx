@@ -13,6 +13,7 @@ import {
   type QuizResult,
 } from "@/components/quiz/quizTypes";
 import { writeScreening } from "@/lib/screening";
+import { readApplicationResult } from "@/lib/applications/clientResult";
 
 type FormState = {
   name: string;
@@ -52,6 +53,7 @@ export function ContactForm({
   const [form, setForm] = useState<FormState>(initialState);
   const [submitError, setSubmitError] = useState("");
   const [sent, setSent] = useState(false);
+  const [sending, setSending] = useState(false);
 
   useEffect(() => {
     if (!quizResult) {
@@ -89,7 +91,18 @@ export function ContactForm({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (sending) {
+      return;
+    }
     setSubmitError("");
+    if (!form.lookingFor) {
+      setSubmitError(t.platform.auth.required);
+      return;
+    }
+    if (!form.privacy) {
+      setSubmitError(t.platform.auth.required);
+      return;
+    }
     const role = form.lookingFor === "man" ? "MAN" : "WOMAN";
     writeScreening({
       name: form.name.trim(),
@@ -101,6 +114,7 @@ export function ContactForm({
       interviewReady: form.interviewReady,
       track: role,
     });
+    setSending(true);
     try {
       const response = await fetch("/api/application", {
         method: "POST",
@@ -116,16 +130,16 @@ export function ContactForm({
           source: "website",
         }),
       });
-      const payload = (await response.json().catch(() => null)) as
-        | { success?: boolean }
-        | null;
-      if (!response.ok || !payload?.success) {
-        setSubmitError(t.form.submitError);
+      const result = await readApplicationResult(response);
+      if (!result.ok) {
+        setSubmitError(result.error || t.form.submitError);
         return;
       }
     } catch {
       setSubmitError(t.form.submitError);
       return;
+    } finally {
+      setSending(false);
     }
     setSent(true);
   }
@@ -271,7 +285,6 @@ export function ContactForm({
                       }`}
                     >
                       <input
-                        required
                         type="radio"
                         name="lookingFor"
                         value="woman"
@@ -294,7 +307,6 @@ export function ContactForm({
                       }`}
                     >
                       <input
-                        required
                         type="radio"
                         name="lookingFor"
                         value="man"
@@ -345,6 +357,7 @@ export function ContactForm({
 
                 <motion.button
                   type="submit"
+                  disabled={sending}
                   whileHover={{
                     y: -2,
                     boxShadow:
@@ -352,9 +365,9 @@ export function ContactForm({
                   }}
                   whileTap={{ scale: 0.985 }}
                   transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-                  className="w-full bg-gold py-3.5 text-[11px] font-medium uppercase tracking-[0.18em] text-obsidian transition-colors duration-500 hover:bg-gold-light"
+                  className="w-full bg-gold py-3.5 text-[11px] font-medium uppercase tracking-[0.18em] text-obsidian transition-colors duration-500 hover:bg-gold-light disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {t.platform.screening.continue}
+                  {t.form.submit}
                 </motion.button>
               </motion.form>
           )}

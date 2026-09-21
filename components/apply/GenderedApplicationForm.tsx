@@ -5,6 +5,7 @@ import { FormEvent, useState } from "react";
 import { useLanguage } from "@/lib/i18n/LanguageProvider";
 import { cityKeys, type CityKey } from "@/components/quiz/quizTypes";
 import { writeScreening } from "@/lib/screening";
+import { readApplicationResult } from "@/lib/applications/clientResult";
 
 const fieldClass =
   "w-full border border-white/[0.06] bg-white/[0.02] px-4 py-3 text-base text-ivory outline-none backdrop-blur-sm transition-colors duration-300 placeholder:text-ivory/30 focus:border-gold";
@@ -28,10 +29,18 @@ export function GenderedApplicationForm({
   const [privacy, setPrivacy] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [sent, setSent] = useState(false);
+  const [sending, setSending] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (sending) {
+      return;
+    }
     setSubmitError("");
+    if (!privacy) {
+      setSubmitError(t.platform.auth.required);
+      return;
+    }
 
     const resolvedCity =
       track === "women"
@@ -48,6 +57,7 @@ export function GenderedApplicationForm({
       track: track === "men" ? "MAN" : "WOMAN",
     });
 
+    setSending(true);
     try {
       const response = await fetch("/api/application", {
         method: "POST",
@@ -62,16 +72,16 @@ export function GenderedApplicationForm({
           source: "website",
         }),
       });
-      const payload = (await response.json().catch(() => null)) as
-        | { success?: boolean }
-        | null;
-      if (!response.ok || !payload?.success) {
-        setSubmitError(t.form.submitError);
+      const result = await readApplicationResult(response);
+      if (!result.ok) {
+        setSubmitError(result.error || t.form.submitError);
         return;
       }
     } catch {
       setSubmitError(t.form.submitError);
       return;
+    } finally {
+      setSending(false);
     }
 
     setSent(true);
@@ -185,7 +195,6 @@ export function GenderedApplicationForm({
                 }`}
               >
                 <input
-                  required
                   type="radio"
                   name="lookingFor"
                   value="woman"
@@ -203,7 +212,6 @@ export function GenderedApplicationForm({
                 }`}
               >
                 <input
-                  required
                   type="radio"
                   name="lookingFor"
                   value="man"
@@ -245,6 +253,7 @@ export function GenderedApplicationForm({
 
         <motion.button
           type="submit"
+          disabled={sending}
           whileHover={{
             y: -2,
             boxShadow:
@@ -252,9 +261,9 @@ export function GenderedApplicationForm({
           }}
           whileTap={{ scale: 0.985 }}
           transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-          className="w-full bg-gold py-3.5 text-[11px] font-medium uppercase tracking-[0.18em] text-obsidian transition-colors duration-500 hover:bg-gold-light"
+          className="w-full bg-gold py-3.5 text-[11px] font-medium uppercase tracking-[0.18em] text-obsidian transition-colors duration-500 hover:bg-gold-light disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {t.platform.screening.continue}
+          {t.form.submit}
         </motion.button>
       </form>
     </>
