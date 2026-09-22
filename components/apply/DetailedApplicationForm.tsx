@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useLanguage } from "@/lib/i18n/LanguageProvider";
 import { fieldClass, goldButtonClass, labelClass } from "@/components/ui/formStyles";
@@ -32,6 +32,7 @@ export function DetailedApplicationForm({ track }: { track: ApplyTrack }) {
   const [saving, setSaving] = useState(false);
   const [email, setEmail] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const hydrated = useRef(false);
 
   function setField(name: string, value: string | number | boolean | null) {
     setSet((current) => ({ ...current, [name]: value }));
@@ -48,9 +49,10 @@ export function DetailedApplicationForm({ track }: { track: ApplyTrack }) {
         return response.json();
       })
       .then((data) => {
-        if (!data?.application) {
+        if (!data?.application || hydrated.current) {
           return;
         }
+        hydrated.current = true;
         const application = data.application as Record<string, unknown>;
         const preferences = (data.preferences || {}) as Record<string, unknown>;
         setEmail(data.email || "");

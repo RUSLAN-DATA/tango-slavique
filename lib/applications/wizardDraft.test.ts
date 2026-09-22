@@ -38,6 +38,11 @@ describe("website wizard mapping", () => {
     expect(patch.details).toMatchObject({ weightKg: 58, smoking: "no", quizGoal: "marriage" });
   });
 
+  it("coerces height from numeric strings", () => {
+    const patch = mapWizardToProfilePatch({ heightCm: "182" });
+    expect(patch.height).toBe(182);
+  });
+
   it("maps preferences PATCH including Mini App-compatible fields", () => {
     const patch = mapWizardToPreferencesPatch({
       preferredAgeMin: 28,

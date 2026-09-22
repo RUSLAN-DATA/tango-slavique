@@ -56,6 +56,7 @@ function createMemoryEnv(): Env & { store: Record<string, Row[]> } {
     introductions: [],
     feedback: [],
     notifications: [],
+    photo_reviews: [],
   };
   const r2 = new Map<string, Uint8Array>();
 
@@ -612,6 +613,9 @@ function runSql(store: Record<string, Row[]>, sql: string, params: unknown[]): R
       }
     }
     return [];
+  }
+  if (lower.includes("from photo_reviews where photo_id = ?")) {
+    return (store.photo_reviews || []).filter((item) => item.photo_id === params[0]);
   }
   if (lower.includes("from photos where id = ?")) {
     return store.photos.filter((item) => item.id === params[0]);
@@ -1575,6 +1579,269 @@ describe("website onboarding", () => {
     expect(me.data?.role).toBe("user");
     const dashboard = await withToken(env, "/api/admin/dashboard", String(registered.data?.token));
     expect(dashboard?.status).toBe(403);
+  });
+});
+
+describe("admin application profile", () => {
+  it("returns the complete website questionnaire, photos and preference details", async () => {
+    const env = createMemoryEnv();
+    const registered = await parseOk(
+      (await webRegister(env, {
+        email: "ruslan.admin@example.com",
+        firstName: "Ruslan",
+        lastName: "Shairakhmetov",
+        track: "MAN",
+      }))!
+    );
+    const token = String(registered.data?.token);
+    const userId = String(registered.data?.userId);
+    await withToken(env, "/api/profile", token, {
+      method: "PATCH",
+      body: JSON.stringify({
+        first_name: "Ruslan",
+        last_name: "Shairakhmetov",
+        city: "Barcelona",
+        country: "Spain",
+        gender: "man",
+        birth_date: "1990-05-12",
+        height: 182,
+        marital_status: "single",
+        education: "master",
+        occupation: "founder",
+        languages: "EN, RU",
+        children: "none",
+        about: "I host long dinners",
+        hobbies: "sailing and cooking",
+        current_step: 7,
+        privacy_accepted: true,
+        terms_accepted: true,
+        details: {
+          weightKg: 78,
+          bodyType: "athletic",
+          hairColor: "dark",
+          eyeColor: "brown",
+          nationality: "KZ",
+          religion: "none",
+          annualIncome: "120k",
+          smoking: "no",
+          alcohol: "occasionally",
+          wantsChildren: "yes",
+          lifeGoals: "Build a house by the sea",
+          relationshipExperience: "Two long relationships",
+          instagram: "@ruslan",
+          telegramHandle: "@ruslan_ts",
+          howHeard: "friend",
+          quizGoal: "marriage",
+          quizGeography: "Europe",
+          quizInterviewReady: true,
+          lookingFor: "woman",
+        },
+      }),
+    });
+    await withToken(env, "/api/preferences", token, {
+      method: "PATCH",
+      body: JSON.stringify({
+        gender: "woman",
+        age_min: 28,
+        age_max: 42,
+        intent: "marriage",
+        details: {
+          preferredHeightMin: 160,
+          preferredHeightMax: 175,
+          preferredBodyType: "slim",
+          minimumEducation: "bachelor",
+          importantQualities: "kindness",
+          dealBreakers: "smoking",
+        },
+      }),
+    });
+    const form = new FormData();
+    form.set("file", new File([jpegBytes()], "face.jpg", { type: "image/jpeg" }));
+    const uploaded = await parseOk(await withToken(env, "/api/photos", token, { method: "POST", body: form }));
+    env.store.photo_reviews.push({
+      photo_id: uploaded.data?.id,
+      review_status: "AI_OK",
+      confidence: 0.98,
+      issues: "[]",
+      main_person_detected: 1,
+      face_visible: 1,
+      quality: "good",
+      annotation_key: null,
+      recommended_primary: 1,
+      admin_override: null,
+    });
+    await withToken(env, "/api/profile/submit", token, { method: "POST", body: "{}" });
+    const applicationId = String(env.store.applications[0]?.id);
+
+    const admin = await parseOk(
+      (await adminRequest(env, `/api/applications/${applicationId}`, { method: "GET" }, "1881305255"))!
+    );
+    expect(admin.status).toBe(200);
+    const applicant = admin.data?.applicant as {
+      basic: Record<string, unknown>;
+      appearance: Record<string, unknown>;
+      about: Record<string, unknown>;
+      partner: Record<string, unknown>;
+      additional: Record<string, unknown>;
+    };
+    expect(applicant.basic).toMatchObject({
+      firstName: "Ruslan",
+      lastName: "Shairakhmetov",
+      email: "ruslan.admin@example.com",
+      city: "Barcelona",
+      nationality: "KZ",
+    });
+    expect(applicant.appearance).toMatchObject({ height: 182, bodyType: "athletic" });
+    expect(applicant.about).toMatchObject({
+      hobbies: "sailing and cooking",
+      lifeGoals: "Build a house by the sea",
+      relationshipExperience: "Two long relationships",
+    });
+    expect(applicant.partner).toMatchObject({
+      lookingFor: "woman",
+      ageMin: 28,
+      ageMax: 42,
+      dealBreakers: "smoking",
+      intent: "marriage",
+    });
+    expect(applicant.additional.instagram).toBe("@ruslan");
+    const photos = admin.data?.photos as Array<{ id: string; url: string; review: { status: string } | null }>;
+    expect(photos).toHaveLength(1);
+    expect(photos[0]?.url).toBe(`/api/photos/${uploaded.data?.id}`);
+    expect(photos[0]?.review?.status).toBe("AI_OK");
+    expect(userId).toBeTruthy();
+  });
+
+  it("returns empty applicant fields instead of crashing for old profiles", async () => {
+    const env = createMemoryEnv();
+    const created = await createApplication(env, {
+      name: "Legacy",
+      email: "legacy@example.invalid",
+      phone: "",
+      city: "Madrid",
+      message: "Hello",
+      source: "website",
+      silent: true,
+    });
+    const admin = await parseOk(
+      (await adminRequest(env, `/api/applications/${created.application.id}`, { method: "GET" }, "1591345305"))!
+    );
+    expect(admin.status).toBe(200);
+    expect(admin.data?.applicant).toMatchObject({
+      basic: { firstName: "Legacy", city: "Madrid", lastName: null },
+      appearance: { bodyType: null },
+    });
+    expect(admin.data?.photos).toEqual([]);
+  });
+
+  it("keeps Telegram Mini App applications readable with the same admin payload", async () => {
+    const env = createMemoryEnv();
+    const initData = await signedInitData(env.TELEGRAM_BOT_TOKEN, 42, "Maria");
+    const auth = await parseOk(
+      (await handleApi(
+        new Request("https://example.com/api/auth/telegram", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ initData }),
+        }),
+        env,
+        "/api/auth/telegram"
+      ))!
+    );
+    const token = String(auth.data?.token);
+    await withToken(env, "/api/profile", token, {
+      method: "PATCH",
+      body: JSON.stringify({
+        first_name: "Maria",
+        city: "Madrid",
+        about: "Private introduction",
+        privacy_accepted: true,
+        terms_accepted: true,
+      }),
+    });
+    const form = new FormData();
+    form.set("file", new File([jpegBytes()], "face.jpg", { type: "image/jpeg" }));
+    await withToken(env, "/api/photos", token, { method: "POST", body: form });
+    await withToken(env, "/api/profile/submit", token, { method: "POST", body: "{}" });
+    const applicationId = String(env.store.applications[0]?.id);
+    const admin = await parseOk(
+      (await adminRequest(env, `/api/applications/${applicationId}`, { method: "GET" }, "1881305255"))!
+    );
+    expect(admin.status).toBe(200);
+    expect(admin.data?.source).toBe("miniapp");
+    expect((admin.data?.applicant as { basic: { firstName: string }; about: { aboutMe: string } }).basic.firstName).toBe(
+      "Maria"
+    );
+    expect((admin.data?.applicant as { about: { aboutMe: string } }).about.aboutMe).toBe("Private introduction");
+    const own = await parseOk(await withToken(env, `/api/applications/${applicationId}`, token));
+    expect(own.status).toBe(200);
+    expect(own.data?.name).toBe("Maria");
+    expect(own.data?.applicant).toBeUndefined();
+  });
+
+  it("rejects unauthorized access to admin application profile data", async () => {
+    const env = createMemoryEnv();
+    const created = await createApplication(env, {
+      name: "Secret",
+      email: "secret@example.invalid",
+      phone: "",
+      city: "Valencia",
+      message: "",
+      source: "website",
+      silent: true,
+    });
+    const anon = await handleApi(
+      new Request(`https://example.com/api/applications/${created.application.id}`),
+      env,
+      `/api/applications/${created.application.id}`
+    );
+    expect(anon?.status).toBe(401);
+
+    const outsider = envHasUser(env, "42");
+    const token = "token-outsider";
+    const hash = await sha256Hex(token);
+    env.store.sessions.push({
+      id: "s-out",
+      user_id: outsider.id,
+      token_hash: hash,
+      expires_at: new Date(Date.now() + 86400000).toISOString(),
+      created_at: now(),
+    });
+    const forbidden = await withToken(env, `/api/applications/${created.application.id}`, token);
+    expect(forbidden?.status).toBe(403);
+  });
+
+  it("still approves, rejects and sends an information request", async () => {
+    const env = createMemoryEnv();
+    const created = await createApplication(env, {
+      name: "Actions",
+      email: "",
+      phone: "",
+      city: "Lisbon",
+      message: "",
+      source: "website",
+      silent: true,
+    });
+    const id = created.application.id;
+    const approved = await parseOk(
+      (await adminRequest(env, `/api/applications/${id}/approve`, { method: "POST" }, "1881305255"))!
+    );
+    expect(approved.status).toBe(200);
+    expect(approved.data?.status).toBe("approved");
+    const rejected = await parseOk(
+      (await adminRequest(env, `/api/applications/${id}/reject`, { method: "POST" }, "1881305255"))!
+    );
+    expect(rejected.data?.status).toBe("rejected");
+    const requested = await parseOk(
+      (await adminRequest(
+        env,
+        `/api/applications/${id}/request-info`,
+        { method: "POST", body: JSON.stringify({ message: "Please add your city." }) },
+        "1591345305"
+      ))!
+    );
+    expect(requested.data?.status).toBe("info_requested");
+    expect(env.store.applications.find((item) => item.id === id)?.status).toBe("info_requested");
   });
 });
 

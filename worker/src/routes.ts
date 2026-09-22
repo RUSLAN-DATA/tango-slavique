@@ -11,6 +11,7 @@ import {
   listApplications,
   updateApplicationStatus,
 } from "./applications/service";
+import { assembleAdminApplication } from "./applications/adminView";
 import { validateApplicationInput } from "./applications/validate";
 import { runMatchingForAll, runMatchingForUser } from "./matches/service";
 import {
@@ -451,6 +452,9 @@ export async function handleApi(
       if (!isAdminUser(env, user) && row.user_id !== user.id) {
         return apiError("FORBIDDEN", "Admin access required", 403);
       }
+      if (isAdminUser(env, user)) {
+        return apiOk(await assembleAdminApplication(env, row));
+      }
       return apiOk(row);
     });
   }
@@ -491,9 +495,15 @@ export async function handleApi(
           values.push(typeof value === "string" ? value.slice(0, max) : null);
         }
       }
-      if (typeof body.height === "number") {
+      const heightValue =
+        typeof body.height === "number"
+          ? body.height
+          : typeof body.height === "string" && body.height.trim()
+            ? Number(body.height)
+            : NaN;
+      if (Number.isFinite(heightValue)) {
         sets.push("height = ?");
-        values.push(Math.trunc(body.height));
+        values.push(Math.trunc(heightValue));
       }
       if (typeof body.age === "number") {
         sets.push("birth_date = ?");

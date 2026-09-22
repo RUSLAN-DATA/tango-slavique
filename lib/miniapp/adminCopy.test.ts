@@ -14,6 +14,9 @@ describe("admin panel i18n", () => {
     expect(adminCopy.ru.nav.dashboard).toBe("Панель управления");
     expect(adminCopy.ru.nav.content).toBe("Контент сайта");
     expect(adminCopy.ru.actions.approve).toBe("Одобрить");
+    expect(adminCopy.ru.applicant.profile).toBe("Профиль");
+    expect(adminCopy.ru.applicant.lifeGoals).toBe("Цели в жизни");
+    expect(adminCopy.en.applicant.hobbies).toBe("Hobbies");
     expect(adminCopy.ru.blog.new).toBe("Новый блог");
     expect(adminCopy.es.blog.unpublish).toBe("Ocultar");
     expect(adminCopy.ru.status.draft).toBe("Черновик");

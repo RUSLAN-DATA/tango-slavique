@@ -14,7 +14,7 @@ export type WizardDraftInput = {
   dateOfBirth?: string;
   city?: string;
   country?: string;
-  heightCm?: number | null;
+  heightCm?: number | string | null;
   weightKg?: number | null;
   bodyType?: string;
   hairColor?: string;
@@ -118,6 +118,13 @@ export function mapWizardToProfilePatch(input: WizardDraftInput): Record<string,
   }
   assignDetail("lookingFor", input.lookingFor);
 
+  const heightCm =
+    typeof input.heightCm === "number"
+      ? input.heightCm
+      : typeof input.heightCm === "string" && String(input.heightCm).trim()
+        ? Number(input.heightCm)
+        : input.heightCm;
+
   const patch: Record<string, unknown> = {};
   if (input.firstName !== undefined) patch.first_name = input.firstName;
   if (input.lastName !== undefined) patch.last_name = input.lastName;
@@ -129,7 +136,7 @@ export function mapWizardToProfilePatch(input: WizardDraftInput): Record<string,
     const gender = genderFromTrack(input.track);
     if (gender) patch.gender = gender;
   }
-  if (input.heightCm !== undefined) patch.height = input.heightCm;
+  if (heightCm !== undefined) patch.height = Number.isFinite(Number(heightCm)) ? Number(heightCm) : heightCm;
   if (input.maritalStatus !== undefined) patch.marital_status = input.maritalStatus;
   if (input.education !== undefined) patch.education = input.education;
   if (input.profession !== undefined) patch.occupation = input.profession;
