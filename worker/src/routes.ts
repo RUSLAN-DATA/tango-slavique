@@ -489,10 +489,13 @@ export async function handleApi(
       const sets: string[] = [];
       for (const field of Object.keys(PROFILE_STRING_LIMITS)) {
         if (field in body) {
-          sets.push(`${field} = ?`);
           const value = body[field];
+          if (typeof value !== "string" || !value.trim()) {
+            continue;
+          }
+          sets.push(`${field} = ?`);
           const max = PROFILE_STRING_LIMITS[field];
-          values.push(typeof value === "string" ? value.slice(0, max) : null);
+          values.push(value.slice(0, max));
         }
       }
       const heightValue =
@@ -646,9 +649,23 @@ export async function handleApi(
       )
         .bind(user.id)
         .first<Record<string, unknown>>();
-      const asString = (value: unknown, max: number) =>
-        typeof value === "string" ? value.slice(0, max) : undefined;
-      const asNumber = (value: unknown) => (typeof value === "number" ? value : undefined);
+      const asString = (value: unknown, max: number) => {
+        if (typeof value !== "string") {
+          return undefined;
+        }
+        const text = value.trim().slice(0, max);
+        return text ? text : undefined;
+      };
+      const asNumber = (value: unknown) => {
+        if (typeof value === "number" && Number.isFinite(value)) {
+          return value;
+        }
+        if (typeof value === "string" && value.trim()) {
+          const parsed = Number(value);
+          return Number.isFinite(parsed) ? parsed : undefined;
+        }
+        return undefined;
+      };
       const preferenceDetailKeys = [
         "preferredHeightMin",
         "preferredHeightMax",
@@ -659,7 +676,7 @@ export async function handleApi(
       ] as const;
       const incomingDetails: Record<string, unknown> = { ...parseDetails(body.details) };
       for (const key of preferenceDetailKeys) {
-        if (key in body) {
+        if (key in body && body[key] !== "" && body[key] !== null) {
           incomingDetails[key] = body[key];
         }
       }

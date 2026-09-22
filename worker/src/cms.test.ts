@@ -1565,6 +1565,75 @@ describe("website onboarding", () => {
     expect(env.store.applications[0]?.source).toBe("miniapp");
   });
 
+  it("keeps filled questionnaire details when a later empty draft save is merged", async () => {
+    const env = createMemoryEnv();
+    const registered = await parseOk(
+      (await webRegister(env, {
+        email: "qa.ruslan@example.invalid",
+        firstName: "QA-Ruslan",
+        lastName: "Test",
+        track: "MAN",
+      }))!
+    );
+    const token = String(registered.data?.token);
+    await withToken(env, "/api/profile", token, {
+      method: "PATCH",
+      body: JSON.stringify({
+        city: "Barcelona",
+        country: "Spain",
+        height: 182,
+        about: "QA about me text",
+        hobbies: "QA sailing",
+        current_step: 5,
+        details: {
+          bodyType: "athletic",
+          lifeGoals: "QA house by the sea",
+          relationshipExperience: "QA two relationships",
+          lookingFor: "woman",
+        },
+      }),
+    });
+    await withToken(env, "/api/preferences", token, {
+      method: "PATCH",
+      body: JSON.stringify({
+        gender: "woman",
+        age_min: 28,
+        age_max: 42,
+        intent: "marriage",
+        details: { dealBreakers: "QA smoking", preferredHeightMin: 160 },
+      }),
+    });
+    const wiped = await parseOk(
+      (await withToken(env, "/api/profile", token, {
+        method: "PATCH",
+        body: JSON.stringify({
+          current_step: 7,
+          details: { bodyType: "", lifeGoals: "", lookingFor: "" },
+        }),
+      }))!
+    );
+    expect(wiped.data?.details).toMatchObject({
+      bodyType: "athletic",
+      lifeGoals: "QA house by the sea",
+      lookingFor: "woman",
+    });
+    expect(wiped.data?.about).toBe("QA about me text");
+    const prefs = await parseOk(
+      (await withToken(env, "/api/preferences", token, {
+        method: "PATCH",
+        body: JSON.stringify({
+          gender: "",
+          details: { dealBreakers: "", preferredBodyType: "" },
+        }),
+      }))!
+    );
+    expect(prefs.data?.gender).toBe("woman");
+    expect(prefs.data?.details).toMatchObject({
+      dealBreakers: "QA smoking",
+      preferredHeightMin: 160,
+    });
+  });
+
   it("does not grant admin to a website user even with an admin-looking email", async () => {
     const env = createMemoryEnv();
     const registered = await parseOk(

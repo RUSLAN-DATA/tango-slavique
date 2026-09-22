@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useLanguage } from "@/lib/i18n/LanguageProvider";
 import { fieldClass, goldButtonClass, labelClass } from "@/components/ui/formStyles";
@@ -32,7 +32,10 @@ export function DetailedApplicationForm({ track }: { track: ApplyTrack }) {
   const [saving, setSaving] = useState(false);
   const [email, setEmail] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [ready, setReady] = useState(false);
   const hydrated = useRef(false);
+  const formRef = useRef(form);
+  formRef.current = form;
 
   function setField(name: string, value: string | number | boolean | null) {
     setSet((current) => ({ ...current, [name]: value }));
@@ -50,6 +53,9 @@ export function DetailedApplicationForm({ track }: { track: ApplyTrack }) {
       })
       .then((data) => {
         if (!data?.application || hydrated.current) {
+          if (!hydrated.current) {
+            setReady(true);
+          }
           return;
         }
         hydrated.current = true;
@@ -113,45 +119,57 @@ export function DetailedApplicationForm({ track }: { track: ApplyTrack }) {
           privacyAccepted: Boolean(application.privacyAcceptedAt),
           termsAccepted: Boolean(application.termsAcceptedAt),
         });
+        setReady(true);
       })
-      .catch(() => undefined);
+      .catch(() => {
+        setReady(true);
+      });
   }, [locale, router, track]);
 
   const locked = status !== "DRAFT" && status !== "NEEDS_MORE_INFO";
 
-  const payload = useMemo(
-    () => ({
-      ...form,
+  function draftPayload(nextStep = step) {
+    const current = formRef.current;
+    return {
+      ...current,
       track,
       language: locale,
-      currentStep: step,
-      heightCm: form.heightCm ? Number(form.heightCm) : null,
-      weightKg: form.weightKg ? Number(form.weightKg) : null,
-      preferredAgeMin: form.preferredAgeMin ? Number(form.preferredAgeMin) : null,
-      preferredAgeMax: form.preferredAgeMax ? Number(form.preferredAgeMax) : null,
-      preferredHeightMin: form.preferredHeightMin ? Number(form.preferredHeightMin) : null,
-      preferredHeightMax: form.preferredHeightMax ? Number(form.preferredHeightMax) : null,
-    }),
-    [form, locale, step, track]
-  );
+      currentStep: nextStep,
+      heightCm: current.heightCm ? Number(current.heightCm) : null,
+      weightKg: current.weightKg ? Number(current.weightKg) : null,
+      preferredAgeMin: current.preferredAgeMin ? Number(current.preferredAgeMin) : null,
+      preferredAgeMax: current.preferredAgeMax ? Number(current.preferredAgeMax) : null,
+      preferredHeightMin: current.preferredHeightMin ? Number(current.preferredHeightMin) : null,
+      preferredHeightMax: current.preferredHeightMax ? Number(current.preferredHeightMax) : null,
+      intent: current.intent || current.quizGoal || undefined,
+    };
+  }
 
   async function save(nextStep = step) {
     if (locked) {
-      return;
+      return false;
     }
     setSaving(true);
     setMessage("");
-    await fetch("/api/account/application", {
+    const response = await fetch("/api/account/application", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...payload, currentStep: nextStep }),
+      body: JSON.stringify(draftPayload(nextStep)),
     });
     setSaving(false);
+    if (!response.ok) {
+      setMessage(t.form.submitError);
+      return false;
+    }
     setMessage(copy.saved);
+    return true;
   }
 
   async function go(nextStep: number) {
-    await save(nextStep);
+    const saved = await save(nextStep);
+    if (!saved) {
+      return;
+    }
     setStep(nextStep);
     writeScreening({ track });
   }
@@ -172,7 +190,7 @@ export function DetailedApplicationForm({ track }: { track: ApplyTrack }) {
     const response = await fetch("/api/account/application", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...payload, privacyAccepted: true, termsAccepted: true }),
+      body: JSON.stringify({ ...draftPayload(step), privacyAccepted: true, termsAccepted: true }),
     });
     const data = (await response.json()) as { error?: string };
     setSaving(false);
@@ -222,6 +240,12 @@ export function DetailedApplicationForm({ track }: { track: ApplyTrack }) {
   return submitted || (locked && status !== "NEEDS_MORE_INFO") ? (
     <div className="mx-auto max-w-2xl space-y-5 text-center">
       <p className="text-[11px] uppercase tracking-[0.18em] text-gold">{copy.submitted}</p>
+    </div>
+  ) : !ready ? (
+    <div className="mx-auto max-w-2xl">
+      <p className="font-display text-2xl text-gold/70">
+        {copy.step} 1 {copy.of} 7
+      </p>
     </div>
   ) : (
     <div className="mx-auto max-w-2xl">

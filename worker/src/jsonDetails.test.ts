@@ -16,4 +16,19 @@ describe("details json merge", () => {
     expect(parseDetails(null)).toEqual({});
     expect(JSON.parse(mergeDetails("{", { smoking: "no" }))).toEqual({ smoking: "no" });
   });
+
+  it("does not let empty incoming values wipe stored details", () => {
+    expect(
+      JSON.parse(
+        mergeDetails(
+          { dealBreakers: "smoking", quizInterviewReady: true, preferredHeightMin: 160 },
+          { dealBreakers: "", preferredBodyType: "", preferredHeightMin: null, quizInterviewReady: false }
+        )
+      )
+    ).toEqual({
+      dealBreakers: "smoking",
+      quizInterviewReady: false,
+      preferredHeightMin: 160,
+    });
+  });
 });

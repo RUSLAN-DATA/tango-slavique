@@ -43,6 +43,28 @@ describe("website wizard mapping", () => {
     expect(patch.height).toBe(182);
   });
 
+  it("skips empty preference values so later steps cannot wipe details", () => {
+    expect(
+      mapWizardToPreferencesPatch({
+        preferredAgeMin: null,
+        preferredBodyType: "",
+        lookingFor: "",
+        dealBreakers: "",
+      })
+    ).toBeNull();
+  });
+
+  it("reconstructs numeric strings from details JSON", () => {
+    const state = reconstructWizardState({
+      profile: { height: "182", details: { weightKg: "78" } },
+      preferences: { age_min: "30", details: { preferredHeightMin: "170" } },
+    });
+    expect(state.application.heightCm).toBe(182);
+    expect(state.application.weightKg).toBe(78);
+    expect(state.preferences.preferredAgeMin).toBe(30);
+    expect(state.preferences.preferredHeightMin).toBe(170);
+  });
+
   it("maps preferences PATCH including Mini App-compatible fields", () => {
     const patch = mapWizardToPreferencesPatch({
       preferredAgeMin: 28,
@@ -62,6 +84,7 @@ describe("website wizard mapping", () => {
         dealBreakers: "smoking",
       },
     });
+    expect(mapWizardToPreferencesPatch({ quizGoal: "marriage" })?.intent).toBe("marriage");
   });
 
   it("reconstructs wizard state from Worker payloads", () => {

@@ -22,7 +22,14 @@ export function parseDetails(value: unknown): Record<string, unknown> {
 export function mergeDetails(existing: unknown, incoming: unknown): string {
   const current = parseDetails(existing);
   const next = parseDetails(incoming);
-  return JSON.stringify({ ...current, ...next });
+  const merged = { ...current };
+  for (const [key, value] of Object.entries(next)) {
+    if (value === undefined || value === null || value === "") {
+      continue;
+    }
+    merged[key] = value;
+  }
+  return JSON.stringify(merged);
 }
 
 export function asLimitedText(value: unknown, max: number): string | null {

@@ -55,7 +55,30 @@ function text(value: unknown): string {
 }
 
 function numberOrNull(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  const parsed = numberOrNull(value);
+  return parsed === null ? undefined : parsed;
+}
+
+function assignIfText(target: Record<string, unknown>, key: string, value: unknown) {
+  if (typeof value !== "string") {
+    return;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return;
+  }
+  target[key] = trimmed;
 }
 
 function genderFromTrack(track?: string) {
@@ -126,24 +149,25 @@ export function mapWizardToProfilePatch(input: WizardDraftInput): Record<string,
         : input.heightCm;
 
   const patch: Record<string, unknown> = {};
-  if (input.firstName !== undefined) patch.first_name = input.firstName;
-  if (input.lastName !== undefined) patch.last_name = input.lastName;
-  if (input.phone !== undefined) patch.phone = input.phone;
-  if (input.dateOfBirth !== undefined) patch.birth_date = input.dateOfBirth;
-  if (input.city !== undefined) patch.city = input.city;
-  if (input.country !== undefined) patch.country = input.country;
+  assignIfText(patch, "first_name", input.firstName);
+  assignIfText(patch, "last_name", input.lastName);
+  assignIfText(patch, "phone", input.phone);
+  assignIfText(patch, "birth_date", input.dateOfBirth);
+  assignIfText(patch, "city", input.city);
+  assignIfText(patch, "country", input.country);
   if (input.track) {
     const gender = genderFromTrack(input.track);
     if (gender) patch.gender = gender;
   }
-  if (heightCm !== undefined) patch.height = Number.isFinite(Number(heightCm)) ? Number(heightCm) : heightCm;
-  if (input.maritalStatus !== undefined) patch.marital_status = input.maritalStatus;
-  if (input.education !== undefined) patch.education = input.education;
-  if (input.profession !== undefined) patch.occupation = input.profession;
-  if (input.languages !== undefined) patch.languages = input.languages;
-  if (input.children !== undefined) patch.children = input.children;
-  if (input.aboutMe !== undefined) patch.about = input.aboutMe;
-  if (input.hobbies !== undefined) patch.hobbies = input.hobbies;
+  const heightValue = finiteNumber(heightCm);
+  if (heightValue !== undefined) patch.height = heightValue;
+  assignIfText(patch, "marital_status", input.maritalStatus);
+  assignIfText(patch, "education", input.education);
+  assignIfText(patch, "occupation", input.profession);
+  assignIfText(patch, "languages", input.languages);
+  assignIfText(patch, "children", input.children);
+  assignIfText(patch, "about", input.aboutMe);
+  assignIfText(patch, "hobbies", input.hobbies);
   if (typeof input.currentStep === "number") patch.current_step = input.currentStep;
   if (input.privacyAccepted) patch.privacy_accepted = true;
   if (input.termsAccepted) patch.terms_accepted = true;
@@ -153,18 +177,22 @@ export function mapWizardToProfilePatch(input: WizardDraftInput): Record<string,
 
 export function mapWizardToPreferencesPatch(input: WizardDraftInput): Record<string, unknown> | null {
   const patch: Record<string, unknown> = {};
-  if (input.preferredAgeMin !== undefined) patch.age_min = input.preferredAgeMin;
-  if (input.preferredAgeMax !== undefined) patch.age_max = input.preferredAgeMax;
-  if (input.lookingFor !== undefined) patch.gender = input.lookingFor;
-  if (input.intent !== undefined) patch.intent = input.intent;
+  const ageMin = finiteNumber(input.preferredAgeMin);
+  const ageMax = finiteNumber(input.preferredAgeMax);
+  if (ageMin !== undefined) patch.age_min = ageMin;
+  if (ageMax !== undefined) patch.age_max = ageMax;
+  assignIfText(patch, "gender", input.lookingFor);
+  assignIfText(patch, "intent", input.intent || input.quizGoal);
 
   const details: Record<string, unknown> = {};
-  if (input.preferredHeightMin !== undefined) details.preferredHeightMin = input.preferredHeightMin;
-  if (input.preferredHeightMax !== undefined) details.preferredHeightMax = input.preferredHeightMax;
-  if (input.preferredBodyType !== undefined) details.preferredBodyType = input.preferredBodyType;
-  if (input.minimumEducation !== undefined) details.minimumEducation = input.minimumEducation;
-  if (input.importantQualities !== undefined) details.importantQualities = input.importantQualities;
-  if (input.dealBreakers !== undefined) details.dealBreakers = input.dealBreakers;
+  const heightMin = finiteNumber(input.preferredHeightMin);
+  const heightMax = finiteNumber(input.preferredHeightMax);
+  if (heightMin !== undefined) details.preferredHeightMin = heightMin;
+  if (heightMax !== undefined) details.preferredHeightMax = heightMax;
+  assignIfText(details, "preferredBodyType", input.preferredBodyType);
+  assignIfText(details, "minimumEducation", input.minimumEducation);
+  assignIfText(details, "importantQualities", input.importantQualities);
+  assignIfText(details, "dealBreakers", input.dealBreakers);
   if (Object.keys(details).length) patch.details = details;
 
   return Object.keys(patch).length ? patch : null;
