@@ -390,7 +390,10 @@ export function DetailedApplicationForm({ track }: { track: ApplyTrack }) {
           </button>
         )}
       </div>
-      <a href="/account" className="mt-6 inline-block text-[11px] uppercase tracking-[0.16em] text-ivory/40">
+      <a
+        href={track === "WOMAN" ? "/apply/women/form" : "/apply/men/form"}
+        className="mt-6 inline-block text-[11px] uppercase tracking-[0.16em] text-ivory/40"
+      >
         {copy.continueLater}
       </a>
     </div>
