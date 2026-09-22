@@ -1,6 +1,8 @@
 import type { Env } from "./env";
 import { corsHeaders, apiError, apiOk } from "./http";
 import { isAdminUser, requireAdmin, requireUser, createSession, upsertTelegramUser } from "./auth/session";
+import { upsertWebUser } from "./auth/webRegister";
+import { mergeDetails, parseDetails } from "./jsonDetails";
 import { validateTelegramInitData } from "./auth/telegramInitData";
 import { isTelegramAdmin, parseTelegramAdminIds } from "./telegram/adminIds";
 import {
@@ -80,11 +82,47 @@ function sanitizeProfile(row: Record<string, unknown>, admin: boolean) {
     height: row.height,
     hobbies: row.hobbies,
     status: row.status,
+    current_step: row.current_step ?? 1,
+    privacy_accepted_at: row.privacy_accepted_at ?? null,
+    terms_accepted_at: row.terms_accepted_at ?? null,
   };
   if (admin) {
-    return base;
+    return { ...base, details: parseDetails(row.details) };
   }
   return base;
+}
+
+const PROFILE_STRING_LIMITS: Record<string, number> = {
+  first_name: 500,
+  last_name: 500,
+  birth_date: 32,
+  gender: 40,
+  city: 80,
+  country: 80,
+  about: 4000,
+  occupation: 500,
+  education: 500,
+  languages: 200,
+  children: 80,
+  marital_status: 80,
+  hobbies: 2000,
+};
+
+function asConsentTimestamp(value: unknown, existing: unknown): string | undefined {
+  if (value === true) {
+    return typeof existing === "string" && existing.trim() ? existing : nowIso();
+  }
+  if (typeof value === "string" && value.trim()) {
+    return value.trim().slice(0, 40);
+  }
+  return undefined;
+}
+
+function withParsedDetails(row: Record<string, unknown> | null) {
+  if (!row) {
+    return {};
+  }
+  return { ...row, details: parseDetails(row.details) };
 }
 
 export async function handleApi(
@@ -205,6 +243,34 @@ export async function handleApi(
     return withCors(apiOk({ locale, page: publicContentPage[1], overrides }));
   }
 
+  if (path === "/api/auth/web/register" && method === "POST") {
+    return wrap(async () => {
+      const body = await readJson(request);
+      const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+      const firstName = typeof body.firstName === "string" ? body.firstName.trim().slice(0, 80) : "";
+      const lastName = typeof body.lastName === "string" ? body.lastName.trim().slice(0, 80) : "";
+      const phone = typeof body.phone === "string" ? body.phone.trim().slice(0, 40) : "";
+      const trackRaw = typeof body.track === "string" ? body.track.toUpperCase() : "";
+      const track = trackRaw === "MAN" || trackRaw === "WOMAN" ? trackRaw : "";
+      if (!email.includes("@") || !firstName || !lastName) {
+        return apiError("VALIDATION_ERROR", "Provide a name and a valid email.", 400);
+      }
+      const user = await upsertWebUser(env, {
+        email,
+        firstName,
+        lastName,
+        track,
+        phone,
+      });
+      const token = await createSession(env, user.id);
+      return apiOk({
+        token,
+        userId: user.id,
+        track: track || null,
+      });
+    });
+  }
+
   if (path === "/api/auth/telegram" && method === "POST") {
     return wrap(async () => {
       const body = await readJson(request);
@@ -244,6 +310,9 @@ export async function handleApi(
         role: isAdminUser(env, user) ? "admin" : "user",
         status: user.status,
         adminLocale: user.admin_locale || "en",
+        email: user.email,
+        phone: user.phone,
+        telegramUserId: user.telegram_user_id,
       });
     });
   }
@@ -395,7 +464,7 @@ export async function handleApi(
         .bind(user.id)
         .first<Record<string, unknown>>();
       return apiOk({
-        ...(profile || {}),
+        ...withParsedDetails(profile),
         age: ageFromBirthDate(
           typeof profile?.birth_date === "string" ? profile.birth_date : null
         ),
@@ -407,28 +476,19 @@ export async function handleApi(
     return wrap(async () => {
       const user = await requireUser(env, request);
       const body = await readJson(request);
-      const fields = [
-        "first_name",
-        "last_name",
-        "birth_date",
-        "gender",
-        "city",
-        "country",
-        "about",
-        "occupation",
-        "education",
-        "languages",
-        "children",
-        "marital_status",
-        "hobbies",
-      ] as const;
+      const existing = await env.DB.prepare(
+        "SELECT * FROM profiles WHERE user_id = ?"
+      )
+        .bind(user.id)
+        .first<Record<string, unknown>>();
       const values: Array<string | number | null> = [];
       const sets: string[] = [];
-      for (const field of fields) {
+      for (const field of Object.keys(PROFILE_STRING_LIMITS)) {
         if (field in body) {
           sets.push(`${field} = ?`);
           const value = body[field];
-          values.push(typeof value === "string" ? value.slice(0, 500) : null);
+          const max = PROFILE_STRING_LIMITS[field];
+          values.push(typeof value === "string" ? value.slice(0, max) : null);
         }
       }
       if (typeof body.height === "number") {
@@ -438,6 +498,35 @@ export async function handleApi(
       if (typeof body.age === "number") {
         sets.push("birth_date = ?");
         values.push(birthDateFromAge(body.age));
+      }
+      if (typeof body.current_step === "number" && body.current_step >= 1 && body.current_step <= 7) {
+        sets.push("current_step = ?");
+        values.push(Math.trunc(body.current_step));
+      }
+      const privacyAt = asConsentTimestamp(
+        body.privacy_accepted ?? body.privacy_accepted_at,
+        existing?.privacy_accepted_at
+      );
+      if (privacyAt) {
+        sets.push("privacy_accepted_at = ?");
+        values.push(privacyAt);
+      }
+      const termsAt = asConsentTimestamp(
+        body.terms_accepted ?? body.terms_accepted_at,
+        existing?.terms_accepted_at
+      );
+      if (termsAt) {
+        sets.push("terms_accepted_at = ?");
+        values.push(termsAt);
+      }
+      if ("details" in body) {
+        sets.push("details = ?");
+        values.push(mergeDetails(existing?.details, body.details));
+      }
+      if (typeof body.phone === "string") {
+        await env.DB.prepare("UPDATE users SET phone = ?, updated_at = ? WHERE id = ?")
+          .bind(body.phone.trim().slice(0, 40) || null, nowIso(), user.id)
+          .run();
       }
       if (!sets.length) {
         return apiError("VALIDATION_ERROR", "No profile fields to update", 400);
@@ -453,14 +542,20 @@ export async function handleApi(
         "SELECT * FROM profiles WHERE user_id = ?"
       )
         .bind(user.id)
-        .first();
-      return apiOk(profile || {});
+        .first<Record<string, unknown>>();
+      return apiOk({
+        ...withParsedDetails(profile),
+        age: ageFromBirthDate(
+          typeof profile?.birth_date === "string" ? profile.birth_date : null
+        ),
+      });
     });
   }
 
   if (path === "/api/profile/submit" && method === "POST") {
     return wrap(async () => {
       const user = await requireUser(env, request);
+      const isWeb = !user.telegram_user_id;
       const profile = await env.DB.prepare(
         "SELECT * FROM profiles WHERE user_id = ?"
       )
@@ -470,19 +565,29 @@ export async function handleApi(
           city: string | null;
           about: string | null;
           birth_date: string | null;
+          privacy_accepted_at: string | null;
+          terms_accepted_at: string | null;
         }>();
       if (!profile?.first_name) {
         return apiError("VALIDATION_ERROR", "Please add your name.", 400);
       }
+      if (isWeb && (!profile.privacy_accepted_at || !profile.terms_accepted_at)) {
+        return apiError("VALIDATION_ERROR", "Please accept privacy and terms.", 400);
+      }
       const photos = await listPhotos(env, user.id);
       if (!photos.length) {
-        return apiError("VALIDATION_ERROR", "Please add at least one photo.", 400);
+        return apiError(
+          isWeb ? "PHOTO_REQUIRED" : "VALIDATION_ERROR",
+          "Please add at least one photo.",
+          400
+        );
       }
       await env.DB.prepare(
         "UPDATE profiles SET status = 'pending', updated_at = ? WHERE user_id = ?"
       )
         .bind(nowIso(), user.id)
         .run();
+      const source = isWeb ? "website" : "miniapp";
       const open = await env.DB.prepare(
         "SELECT id, status FROM applications WHERE user_id = ? ORDER BY created_at DESC LIMIT 1"
       )
@@ -497,17 +602,18 @@ export async function handleApi(
       } else {
         await createApplication(env, {
           name: profile.first_name,
-          email: "",
-          phone: "",
+          email: user.email || "",
+          phone: user.phone || "",
           city: profile.city || "",
           message: profile.about || "",
-          source: "miniapp",
+          source,
           userId: user.id,
           silent: true,
+          reuse: false,
         });
       }
       await notifyNewProfile(env, user.id).catch(() => false);
-      await notifyUser(env, user.id, "application_submitted", { source: "miniapp" });
+      await notifyUser(env, user.id, "application_submitted", { source });
       return apiOk({ submitted: true });
     });
   }
@@ -520,8 +626,8 @@ export async function handleApi(
           "SELECT * FROM partner_preferences WHERE user_id = ?"
         )
           .bind(user.id)
-          .first();
-        return apiOk(row || {});
+          .first<Record<string, unknown>>();
+        return apiOk(withParsedDetails(row));
       }
       const body = await readJson(request);
       const now = nowIso();
@@ -533,6 +639,28 @@ export async function handleApi(
       const asString = (value: unknown, max: number) =>
         typeof value === "string" ? value.slice(0, max) : undefined;
       const asNumber = (value: unknown) => (typeof value === "number" ? value : undefined);
+      const preferenceDetailKeys = [
+        "preferredHeightMin",
+        "preferredHeightMax",
+        "preferredBodyType",
+        "minimumEducation",
+        "importantQualities",
+        "dealBreakers",
+      ] as const;
+      const incomingDetails: Record<string, unknown> = { ...parseDetails(body.details) };
+      for (const key of preferenceDetailKeys) {
+        if (key in body) {
+          incomingDetails[key] = body[key];
+        }
+      }
+      const nextDetails =
+        Object.keys(incomingDetails).length > 0
+          ? mergeDetails(existing?.details, incomingDetails)
+          : typeof existing?.details === "string"
+            ? existing.details
+            : existing?.details
+              ? JSON.stringify(existing.details)
+              : null;
       const next = {
         gender: asString(body.gender, 40) ?? (existing?.gender as string | null) ?? null,
         age_min: asNumber(body.age_min) ?? (existing?.age_min as number | null) ?? null,
@@ -545,10 +673,11 @@ export async function handleApi(
         languages: asString(body.languages, 200) ?? (existing?.languages as string | null) ?? null,
         intent: asString(body.intent, 80) ?? (existing?.intent as string | null) ?? null,
         notes: asString(body.notes, 500) ?? (existing?.notes as string | null) ?? null,
+        details: nextDetails,
       };
       if (existing) {
         await env.DB.prepare(
-          `UPDATE partner_preferences SET gender=?, age_min=?, age_max=?, city=?, country=?, marital_status=?, children=?, languages=?, intent=?, notes=?, updated_at=? WHERE user_id=?`
+          `UPDATE partner_preferences SET gender=?, age_min=?, age_max=?, city=?, country=?, marital_status=?, children=?, languages=?, intent=?, notes=?, details=?, updated_at=? WHERE user_id=?`
         )
           .bind(
             next.gender,
@@ -561,14 +690,15 @@ export async function handleApi(
             next.languages,
             next.intent,
             next.notes,
+            next.details,
             now,
             user.id
           )
           .run();
       } else {
         await env.DB.prepare(
-          `INSERT INTO partner_preferences (id, user_id, gender, age_min, age_max, city, country, marital_status, children, languages, intent, notes, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO partner_preferences (id, user_id, gender, age_min, age_max, city, country, marital_status, children, languages, intent, notes, details, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
           .bind(
             newId(),
@@ -583,6 +713,7 @@ export async function handleApi(
             next.languages,
             next.intent,
             next.notes,
+            next.details,
             now,
             now
           )
@@ -592,8 +723,8 @@ export async function handleApi(
         "SELECT * FROM partner_preferences WHERE user_id = ?"
       )
         .bind(user.id)
-        .first();
-      return apiOk(row || {});
+        .first<Record<string, unknown>>();
+      return apiOk(withParsedDetails(row));
     });
   }
 

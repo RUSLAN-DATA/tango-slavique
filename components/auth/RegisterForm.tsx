@@ -1,23 +1,35 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { AuthCard } from "@/components/auth/AuthCard";
 import { fieldClass, goldButtonClass, labelClass } from "@/components/ui/formStyles";
 import { useLanguage } from "@/lib/i18n/LanguageProvider";
-import { writeScreening } from "@/lib/screening";
+import { readScreening, writeScreening } from "@/lib/screening";
+import { registerSuccessPath } from "@/lib/auth/workerSession";
 import { readApplicationResult } from "@/lib/applications/clientResult";
 
 export function RegisterForm() {
   const { t } = useLanguage();
+  const router = useRouter();
   const params = useSearchParams();
   const role = (params.get("role") || "").toUpperCase();
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
-  const [sent, setSent] = useState(false);
+  const [defaultFirstName, setDefaultFirstName] = useState("");
+  const [defaultLastName, setDefaultLastName] = useState("");
+  const [defaultPhone, setDefaultPhone] = useState("");
 
   const applyTrack = role === "MAN" ? "MAN" : role === "WOMAN" ? "WOMAN" : "";
+
+  useEffect(() => {
+    const screening = readScreening();
+    const screeningName = (screening?.name || "").trim();
+    setDefaultFirstName(screeningName.split(" ")[0] || "");
+    setDefaultLastName(screeningName.split(" ").slice(1).join(" ") || "");
+    setDefaultPhone(screening?.phone || "");
+  }, []);
 
   const title = useMemo(
     () =>
@@ -42,9 +54,8 @@ export function RegisterForm() {
           firstName: String(form.get("firstName") || ""),
           lastName: String(form.get("lastName") || ""),
           email: String(form.get("email") || ""),
-          applyTrack: applyTrack || undefined,
-          role: applyTrack,
-          source: "website",
+          phone: String(form.get("phone") || defaultPhone || ""),
+          track: applyTrack || undefined,
         }),
       });
       const result = await readApplicationResult(response);
@@ -61,44 +72,59 @@ export function RegisterForm() {
     writeScreening({
       track: applyTrack === "MAN" ? "MAN" : applyTrack === "WOMAN" ? "WOMAN" : undefined,
     });
-    setSent(true);
+    router.push(registerSuccessPath(applyTrack));
   }
 
   return (
     <AuthCard title={title} eyebrow={t.platform.auth.register}>
-      {sent ? (
-        <div className="space-y-5 text-center">
-          <p className="text-[11px] uppercase tracking-[0.18em] text-gold">{t.form.successTitle}</p>
-          <p className="text-base font-light leading-relaxed text-ivory-muted">{t.form.successText}</p>
-        </div>
-      ) : (
-        <>
-          <form onSubmit={onSubmit} className="space-y-5">
-            <label className="block">
-              <span className={labelClass}>{t.platform.auth.firstName}</span>
-              <input required name="firstName" autoComplete="given-name" className={fieldClass} />
-            </label>
-            <label className="block">
-              <span className={labelClass}>{t.platform.auth.lastName}</span>
-              <input required name="lastName" autoComplete="family-name" className={fieldClass} />
-            </label>
-            <label className="block">
-              <span className={labelClass}>{t.platform.auth.email}</span>
-              <input required type="email" name="email" autoComplete="email" className={fieldClass} />
-            </label>
-            {error ? <p className="text-sm text-rose-300">{error}</p> : null}
-            <button type="submit" disabled={sending} className={goldButtonClass}>
-              {t.form.submit}
-            </button>
-          </form>
-          <p className="mt-6 text-sm text-ivory/50">
-            {t.platform.auth.hasAccount}{" "}
-            <Link href="/login" className="text-gold">
-              {t.platform.auth.login}
-            </Link>
-          </p>
-        </>
-      )}
+        <form key={`${defaultFirstName}|${defaultLastName}|${defaultPhone}`} onSubmit={onSubmit} className="space-y-5">
+        <label className="block">
+          <span className={labelClass}>{t.platform.auth.firstName}</span>
+          <input
+            required
+            name="firstName"
+            autoComplete="given-name"
+            defaultValue={defaultFirstName}
+            className={fieldClass}
+          />
+        </label>
+        <label className="block">
+          <span className={labelClass}>{t.platform.auth.lastName}</span>
+          <input
+            required
+            name="lastName"
+            autoComplete="family-name"
+            defaultValue={defaultLastName}
+            className={fieldClass}
+          />
+        </label>
+        <label className="block">
+          <span className={labelClass}>{t.platform.auth.email}</span>
+          <input required type="email" name="email" autoComplete="email" className={fieldClass} />
+        </label>
+        {defaultPhone ? (
+          <label className="block">
+            <span className={labelClass}>{t.platform.application.phone}</span>
+            <input
+              name="phone"
+              type="tel"
+              autoComplete="tel"
+              defaultValue={defaultPhone}
+              className={fieldClass}
+            />
+          </label>
+        ) : null}
+        {error ? <p className="text-sm text-rose-300">{error}</p> : null}
+        <button type="submit" disabled={sending} className={goldButtonClass}>
+          {t.form.submit}
+        </button>
+      </form>
+      <p className="mt-6 text-sm text-ivory/50">
+        {t.platform.auth.hasAccount}{" "}
+        <Link href="/login" className="text-gold">
+          {t.platform.auth.login}
+        </Link>
+      </p>
     </AuthCard>
   );
 }

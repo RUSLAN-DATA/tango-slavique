@@ -68,6 +68,7 @@ export default {
 
     const limitedPaths: Record<string, number> = {
       "/api/auth/telegram": 20,
+      "/api/auth/web/register": 8,
       "/api/applications": 60,
       "/api/photos": 15,
     };

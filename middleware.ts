@@ -1,6 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { jwtVerify } from "jose";
 import { SESSION_COOKIE } from "@/lib/constants";
+import {
+  WORKER_SESSION_COOKIE,
+  applyFormRedirect,
+} from "@/lib/auth/workerSession";
 
 function secret() {
   const value = process.env.AUTH_SECRET;
@@ -35,9 +39,19 @@ function isApplyForm(pathname: string) {
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const workerToken = request.cookies.get(WORKER_SESSION_COOKIE)?.value || "";
+  const applyRedirect = applyFormRedirect(pathname, Boolean(workerToken));
+  if (applyRedirect) {
+    return NextResponse.redirect(new URL(applyRedirect, request.url));
+  }
+
+  if (isApplyForm(pathname)) {
+    return NextResponse.next();
+  }
+
   const session = await sessionFromRequest(request);
 
-  if (pathname.startsWith("/account") || isApplyForm(pathname)) {
+  if (pathname.startsWith("/account")) {
     if (!session) {
       const login = new URL("/login", request.url);
       login.searchParams.set("next", pathname);

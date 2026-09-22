@@ -31,6 +31,7 @@ export function DetailedApplicationForm({ track }: { track: ApplyTrack }) {
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const [email, setEmail] = useState("");
+  const [submitted, setSubmitted] = useState(false);
 
   function setField(name: string, value: string | number | boolean | null) {
     setSet((current) => ({ ...current, [name]: value }));
@@ -40,8 +41,8 @@ export function DetailedApplicationForm({ track }: { track: ApplyTrack }) {
     const screening = readScreening();
     fetch("/api/account/application")
       .then(async (response) => {
-        if (response.status === 403) {
-          router.replace("/verify-email");
+        if (response.status === 401) {
+          router.replace(track === "MAN" ? "/register?role=MAN" : "/register?role=WOMAN");
           return null;
         }
         return response.json();
@@ -54,6 +55,9 @@ export function DetailedApplicationForm({ track }: { track: ApplyTrack }) {
         const preferences = (data.preferences || {}) as Record<string, unknown>;
         setEmail(data.email || "");
         setStatus(String(application.status || "DRAFT"));
+        if (String(application.status || "") === "SUBMITTED" || String(application.status || "") === "APPROVED") {
+          setSubmitted(true);
+        }
         setStep(Number(application.currentStep) || 1);
         setPhotos(
           Array.isArray(application.photos)
@@ -174,7 +178,8 @@ export function DetailedApplicationForm({ track }: { track: ApplyTrack }) {
       setMessage(data.error === "PHOTO_REQUIRED" ? copy.needPhoto : t.form.submitError);
       return;
     }
-    router.push("/account/application");
+    setSubmitted(true);
+    setStatus("SUBMITTED");
   }
 
   function Field({
@@ -212,7 +217,11 @@ export function DetailedApplicationForm({ track }: { track: ApplyTrack }) {
     );
   }
 
-  return (
+  return submitted || (locked && status !== "NEEDS_MORE_INFO") ? (
+    <div className="mx-auto max-w-2xl space-y-5 text-center">
+      <p className="text-[11px] uppercase tracking-[0.18em] text-gold">{copy.submitted}</p>
+    </div>
+  ) : (
     <div className="mx-auto max-w-2xl">
       <div className="mb-8 flex items-center justify-between">
         <p className="font-display text-2xl text-gold/70">

@@ -2,10 +2,10 @@
 
 import { motion } from "framer-motion";
 import { FormEvent, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useLanguage } from "@/lib/i18n/LanguageProvider";
 import { cityKeys, type CityKey } from "@/components/quiz/quizTypes";
 import { writeScreening } from "@/lib/screening";
-import { readApplicationResult } from "@/lib/applications/clientResult";
 
 const fieldClass =
   "w-full border border-white/[0.06] bg-white/[0.02] px-4 py-3 text-base text-ivory outline-none backdrop-blur-sm transition-colors duration-300 placeholder:text-ivory/30 focus:border-gold";
@@ -18,6 +18,7 @@ export function GenderedApplicationForm({
   track,
 }: GenderedApplicationFormProps) {
   const { t } = useLanguage();
+  const router = useRouter();
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [age, setAge] = useState("");
@@ -28,7 +29,6 @@ export function GenderedApplicationForm({
   );
   const [privacy, setPrivacy] = useState(false);
   const [submitError, setSubmitError] = useState("");
-  const [sent, setSent] = useState(false);
   const [sending, setSending] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -58,41 +58,10 @@ export function GenderedApplicationForm({
     });
 
     setSending(true);
-    try {
-      const response = await fetch("/api/application", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: name.trim(),
-          phone: phone.trim(),
-          city: resolvedCity,
-          age,
-          lookingFor: track === "men" ? lookingFor : undefined,
-          applicant: track === "men" ? "MAN" : "WOMAN",
-          source: "website",
-        }),
-      });
-      const result = await readApplicationResult(response);
-      if (!result.ok) {
-        setSubmitError(result.error || t.form.submitError);
-        return;
-      }
-    } catch {
-      setSubmitError(t.form.submitError);
-      return;
-    } finally {
-      setSending(false);
-    }
-
-    setSent(true);
+    router.push(track === "men" ? "/register?role=MAN" : "/register?role=WOMAN");
   }
 
-  return sent ? (
-    <div className="space-y-5 text-center">
-      <p className="text-[11px] uppercase tracking-[0.18em] text-gold">{t.form.successTitle}</p>
-      <p className="text-base font-light leading-relaxed text-ivory-muted">{t.form.successText}</p>
-    </div>
-  ) : (
+  return (
     <>
       <form onSubmit={handleSubmit} className="space-y-5">
         <label className="block">

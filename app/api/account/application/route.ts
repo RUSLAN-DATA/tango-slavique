@@ -1,47 +1,105 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ApplicationStatus } from "@prisma/client";
-import { requireVerifiedUser } from "@/lib/auth/session";
-import {
-  getOrCreateApplication,
-  saveApplicationDraft,
-  submitApplication,
-} from "@/lib/applications/applicationService";
 import { clientKey, rateLimit } from "@/lib/rate-limit";
+import { readWorkerSessionToken, workerBff } from "@/lib/worker/bff";
 import {
-  applicationDraftSchema,
-  applicationSubmitSchema,
-} from "@/lib/validation/application";
-import { prisma } from "@/lib/db";
+  mapWizardToPreferencesPatch,
+  mapWizardToProfilePatch,
+  photoRequiredFromWorker,
+  reconstructWizardState,
+  type WizardDraftInput,
+} from "@/lib/applications/wizardDraft";
+
+function unauthorized() {
+  return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
+}
+
+async function persistDraft(token: string, input: WizardDraftInput) {
+  const profilePatch = mapWizardToProfilePatch(input);
+  const preferencesPatch = mapWizardToPreferencesPatch(input);
+  const profile = await workerBff("/api/profile", token, {
+    method: "PATCH",
+    body: JSON.stringify(profilePatch),
+  });
+  if (!profile.ok) {
+    return { error: profile.error?.message || "Unable to save", status: profile.status || 400 };
+  }
+  if (preferencesPatch) {
+    const preferences = await workerBff("/api/preferences", token, {
+      method: "PATCH",
+      body: JSON.stringify(preferencesPatch),
+    });
+    if (!preferences.ok) {
+      return {
+        error: preferences.error?.message || "Unable to save preferences",
+        status: preferences.status || 400,
+      };
+    }
+  }
+  return { ok: true as const };
+}
+
+async function loadWizard(token: string) {
+  const [me, profile, preferences, photos] = await Promise.all([
+    workerBff<Record<string, unknown>>("/api/me", token),
+    workerBff<Record<string, unknown>>("/api/profile", token),
+    workerBff<Record<string, unknown>>("/api/preferences", token),
+    workerBff<{ items?: Array<{ id: string }> }>("/api/photos", token),
+  ]);
+  if (!me.ok) {
+    return { status: me.status || 401, error: me.error?.message || "UNAUTHENTICATED" };
+  }
+  return {
+    ok: true as const,
+    ...reconstructWizardState({
+      me: me.data || null,
+      profile: profile.data || null,
+      preferences: preferences.data || null,
+      photos: photos.data?.items || [],
+    }),
+  };
+}
 
 export async function GET() {
+  const token = readWorkerSessionToken();
+  if (!token) {
+    return unauthorized();
+  }
   try {
-    const user = await requireVerifiedUser();
-    const application = await getOrCreateApplication(user);
-    const preferences = await prisma.partnerPreferences.findUnique({
-      where: { userId: user.id },
-    });
-    return NextResponse.json({ application, preferences, email: user.email });
-  } catch (error) {
-    if (error instanceof Error && error.message === "UNVERIFIED") {
-      return NextResponse.json({ error: "UNVERIFIED" }, { status: 403 });
+    const loaded = await loadWizard(token);
+    if (!("ok" in loaded) || !loaded.ok) {
+      return NextResponse.json(
+        { error: loaded.error || "UNAUTHENTICATED" },
+        { status: loaded.status || 401 }
+      );
     }
-    return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
+    return NextResponse.json({
+      application: loaded.application,
+      preferences: loaded.preferences,
+      email: loaded.email,
+    });
+  } catch {
+    return NextResponse.json({ error: "UNABLE_TO_LOAD" }, { status: 500 });
   }
 }
 
 export async function PATCH(request: NextRequest) {
+  const token = readWorkerSessionToken();
+  if (!token) {
+    return unauthorized();
+  }
   try {
-    const user = await requireVerifiedUser();
-    const parsed = applicationDraftSchema.safeParse(await request.json());
-    if (!parsed.success) {
-      return NextResponse.json({ error: "Invalid input" }, { status: 400 });
+    const input = (await request.json()) as WizardDraftInput;
+    const saved = await persistDraft(token, input);
+    if (!("ok" in saved)) {
+      return NextResponse.json({ error: saved.error }, { status: saved.status });
     }
-    const application = await saveApplicationDraft(user.id, parsed.data);
-    return NextResponse.json({ success: true, application });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to save";
-    const status = message === "UNAUTHENTICATED" ? 401 : message === "UNVERIFIED" ? 403 : 400;
-    return NextResponse.json({ error: message }, { status });
+    const loaded = await loadWizard(token);
+    if (!("ok" in loaded) || !loaded.ok) {
+      return NextResponse.json({ success: true });
+    }
+    return NextResponse.json({ success: true, application: loaded.application });
+  } catch {
+    return NextResponse.json({ error: "Unable to save" }, { status: 400 });
   }
 }
 
@@ -51,33 +109,49 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Too many attempts" }, { status: 429 });
   }
 
+  const token = readWorkerSessionToken();
+  if (!token) {
+    return unauthorized();
+  }
+
   try {
-    const user = await requireVerifiedUser();
-    const parsed = applicationSubmitSchema.safeParse(await request.json());
-    if (!parsed.success) {
-      return NextResponse.json({ error: "Invalid input" }, { status: 400 });
+    const input = (await request.json()) as WizardDraftInput;
+    if (!input.privacyAccepted || !input.termsAccepted) {
+      return NextResponse.json({ error: "CONSENT_REQUIRED" }, { status: 400 });
     }
 
-    const existing = await prisma.application.findUnique({
-      where: { userId: user.id },
-      include: { photos: true },
+    const saved = await persistDraft(token, {
+      ...input,
+      privacyAccepted: true,
+      termsAccepted: true,
     });
-    if (!existing?.photos.length) {
-      return NextResponse.json({ error: "PHOTO_REQUIRED" }, { status: 400 });
+    if (!("ok" in saved)) {
+      return NextResponse.json({ error: saved.error }, { status: saved.status });
     }
 
-    if (
-      existing.status !== ApplicationStatus.DRAFT &&
-      existing.status !== ApplicationStatus.NEEDS_MORE_INFO
-    ) {
-      return NextResponse.json({ error: "Already submitted" }, { status: 400 });
+    const submitted = await workerBff<{ submitted?: boolean }>("/api/profile/submit", token, {
+      method: "POST",
+      body: "{}",
+    });
+    if (!submitted.ok) {
+      if (photoRequiredFromWorker(submitted.error)) {
+        return NextResponse.json({ error: "PHOTO_REQUIRED" }, { status: 400 });
+      }
+      return NextResponse.json(
+        { error: submitted.error?.message || "Unable to submit" },
+        { status: submitted.status || 400 }
+      );
     }
 
-    const application = await submitApplication(user.id, parsed.data);
-    return NextResponse.json({ success: true, application });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to submit";
-    const status = message === "UNAUTHENTICATED" ? 401 : message === "UNVERIFIED" ? 403 : 400;
-    return NextResponse.json({ error: message }, { status });
+    const loaded = await loadWizard(token);
+    return NextResponse.json({
+      success: true,
+      application:
+        "ok" in loaded && loaded.ok
+          ? { ...loaded.application, status: "SUBMITTED" }
+          : { status: "SUBMITTED" },
+    });
+  } catch {
+    return NextResponse.json({ error: "Unable to submit" }, { status: 400 });
   }
 }

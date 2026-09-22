@@ -23,7 +23,7 @@ import {
   publishContent,
   publishedContentMap,
 } from "./content/service";
-import { sha256Hex } from "./crypto";
+import { hmacSha256, hmacSha256Hex, sha256Hex } from "./crypto";
 import type { Env } from "./env";
 
 vi.mock("./telegram/api", () => ({
@@ -348,6 +348,83 @@ function runSql(store: Record<string, Row[]>, sql: string, params: unknown[]): R
   if (lower.includes("from users where telegram_user_id")) {
     return store.users.filter((item) => item.telegram_user_id === params[0]);
   }
+  if (lower.includes("from users") && lower.includes("email = ?") && lower.includes("telegram_user_id is null")) {
+    return store.users.filter(
+      (item) => item.email === params[0] && (item.telegram_user_id === null || item.telegram_user_id === undefined)
+    );
+  }
+  if (lower.includes("from users where id = ?")) {
+    return store.users.filter((item) => item.id === params[0]);
+  }
+  if (lower.startsWith("insert into users")) {
+    const web = lower.includes("values (?, null,");
+    const row: Row = web
+      ? {
+          id: params[0],
+          telegram_user_id: null,
+          email: params[1],
+          phone: params[2],
+          role: "user",
+          status: "active",
+          created_at: params[3],
+          updated_at: params[4],
+          admin_locale: null,
+        }
+      : {
+          id: params[0],
+          telegram_user_id: params[1],
+          email: null,
+          phone: null,
+          role: params[2],
+          status: "active",
+          created_at: params[3],
+          updated_at: params[4],
+          admin_locale: null,
+        };
+    store.users.push(row);
+    return [row];
+  }
+  if (lower.startsWith("update users set phone")) {
+    for (const row of store.users) {
+      if (row.id === params[2] || row.telegram_user_id === params[2]) {
+        row.phone = params[0];
+        row.updated_at = params[1];
+      }
+    }
+    return [];
+  }
+  if (lower.startsWith("update users set role")) {
+    for (const row of store.users) {
+      if (row.id === params[2]) {
+        row.role = params[0];
+        row.updated_at = params[1];
+      }
+    }
+    return [];
+  }
+  if (lower.startsWith("update users set updated_at")) {
+    for (const row of store.users) {
+      if (row.id === params[1]) {
+        row.updated_at = params[0];
+      }
+    }
+    return [];
+  }
+  if (lower.startsWith("insert into profiles")) {
+    const row: Row = {
+      id: params[0],
+      user_id: params[1],
+      first_name: params[2],
+      last_name: params[3],
+      gender: lower.includes("current_step") ? params[4] : null,
+      status: "draft",
+      current_step: 1,
+      created_at: lower.includes("current_step") ? params[5] : params[4],
+      updated_at: lower.includes("current_step") ? params[6] : params[5],
+    };
+    store.profiles.push(row);
+    return [row];
+  }
   if (lower.includes("from sessions s") && lower.includes("token_hash")) {
     const session = store.sessions.find((item) => item.token_hash === params[0]);
     if (!session) return [];
@@ -523,8 +600,52 @@ function runSql(store: Record<string, Row[]>, sql: string, params: unknown[]): R
     }
     return [];
   }
+  if (lower.startsWith("update profiles set")) {
+    const setPart = sql.replace(/^update profiles set /i, "").replace(/ where .*/i, "");
+    const fields = setPart.split(",").map((part) => part.split("=")[0].trim());
+    const userId = params[params.length - 1];
+    for (const row of store.profiles) {
+      if (row.user_id === userId) {
+        fields.forEach((field, index) => {
+          row[field] = params[index];
+        });
+      }
+    }
+    return [];
+  }
+  if (lower.includes("from photos where id = ?")) {
+    return store.photos.filter((item) => item.id === params[0]);
+  }
   if (lower.includes("from photos where user_id")) {
     return store.photos.filter((item) => item.user_id === params[0]);
+  }
+  if (lower.startsWith("insert into photos")) {
+    const row: Row = {
+      id: params[0],
+      user_id: params[1],
+      r2_key: params[2],
+      original_name: params[3],
+      mime_type: params[4],
+      size: params[5],
+      sort_order: params[6],
+      status: "pending",
+      created_at: params[7],
+      is_primary: 0,
+    };
+    store.photos.push(row);
+    return [row];
+  }
+  if (lower.startsWith("update photos set is_primary = 1 where id")) {
+    for (const row of store.photos) {
+      if (row.id === params[0]) row.is_primary = 1;
+    }
+    return [];
+  }
+  if (lower.startsWith("update photos set is_primary = 0")) {
+    for (const row of store.photos) {
+      if (row.user_id === params[0]) row.is_primary = 0;
+    }
+    return [];
   }
   if (lower.startsWith("update applications set status = 'new', message")) {
     for (const row of store.applications) {
@@ -540,6 +661,27 @@ function runSql(store: Record<string, Row[]>, sql: string, params: unknown[]): R
     return store.partner_preferences.filter((item) => item.user_id === params[0]);
   }
   if (lower.startsWith("insert into partner_preferences")) {
+    if (params.length <= 4) {
+      const row: Row = {
+        id: params[0],
+        user_id: params[1],
+        gender: null,
+        age_min: null,
+        age_max: null,
+        city: null,
+        country: null,
+        marital_status: null,
+        children: null,
+        languages: null,
+        intent: null,
+        notes: null,
+        details: null,
+        created_at: params[2],
+        updated_at: params[3],
+      };
+      store.partner_preferences.push(row);
+      return [row];
+    }
     const row: Row = {
       id: params[0],
       user_id: params[1],
@@ -553,26 +695,22 @@ function runSql(store: Record<string, Row[]>, sql: string, params: unknown[]): R
       languages: params[9],
       intent: params[10],
       notes: params[11],
-      created_at: params[12],
-      updated_at: params[13],
+      details: params.length >= 15 ? params[12] : null,
+      created_at: params[params.length - 2],
+      updated_at: params[params.length - 1],
     };
     store.partner_preferences.push(row);
     return [row];
   }
   if (lower.startsWith("update partner_preferences set")) {
+    const setPart = sql.replace(/^update partner_preferences set /i, "").replace(/ where .*/i, "");
+    const fields = setPart.split(",").map((part) => part.split("=")[0].trim());
+    const userId = params[params.length - 1];
     for (const row of store.partner_preferences) {
-      if (row.user_id === params[11]) {
-        row.gender = params[0];
-        row.age_min = params[1];
-        row.age_max = params[2];
-        row.city = params[3];
-        row.country = params[4];
-        row.marital_status = params[5];
-        row.children = params[6];
-        row.languages = params[7];
-        row.intent = params[8];
-        row.notes = params[9];
-        row.updated_at = params[10];
+      if (row.user_id === userId) {
+        fields.forEach((field, index) => {
+          row[field] = params[index];
+        });
       }
     }
     return [];
@@ -587,10 +725,14 @@ function runSql(store: Record<string, Row[]>, sql: string, params: unknown[]): R
     return [];
   }
   if (lower.includes("select count(*)")) {
+    if (lower.includes("from photos")) {
+      const n = store.photos.filter((item) => !params.length || item.user_id === params[0]).length;
+      return [{ count: n, n }];
+    }
     if (lower.includes("blog_articles") && lower.includes("draft")) {
       return [{ n: store.blog_articles.filter((item) => item.status === "draft").length }];
     }
-    return [{ n: 0 }];
+    return [{ n: 0, count: 0 }];
   }
 
   return [];
@@ -1136,3 +1278,303 @@ describe("blog structured formatting", () => {
     expect(env.store.blog_articles.find((item) => item.id === second.id)?.status).toBe("draft");
   });
 });
+
+async function signedInitData(botToken: string, userId: number, firstName: string) {
+  const user = JSON.stringify({ id: userId, first_name: firstName });
+  const authDate = String(Math.floor(Date.now() / 1000));
+  const params = new URLSearchParams({
+    auth_date: authDate,
+    query_id: "AAE",
+    user,
+  });
+  const dataCheckString = [...params.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n");
+  const secretKey = await hmacSha256(new TextEncoder().encode("WebAppData"), botToken);
+  params.set("hash", await hmacSha256Hex(secretKey, dataCheckString));
+  return params.toString();
+}
+
+async function parseOk(response: Response | null) {
+  const body = (await response?.json()) as {
+    ok?: boolean;
+    data?: Record<string, unknown>;
+    error?: { code?: string; message?: string };
+  };
+  return { status: response?.status, ...body };
+}
+
+async function webRegister(env: Env, body: Record<string, unknown>) {
+  return handleApi(
+    new Request("https://example.com/api/auth/web/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+    env,
+    "/api/auth/web/register"
+  );
+}
+
+async function withToken(
+  env: Env,
+  path: string,
+  token: string,
+  init: RequestInit = {}
+) {
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${token}`);
+  if (!(init.body instanceof FormData) && !headers.has("Content-Type") && init.body) {
+    headers.set("Content-Type", "application/json");
+  }
+  return handleApi(
+    new Request("https://example.com" + path, { ...init, headers }),
+    env,
+    path
+  );
+}
+
+describe("website onboarding", () => {
+  it("registers a web user with profile, preferences and hashed session", async () => {
+    const env = createMemoryEnv();
+    const response = await webRegister(env, {
+      email: "Elena@example.com",
+      firstName: "Elena",
+      lastName: "Rios",
+      track: "WOMAN",
+      phone: "+34600000000",
+    });
+    const body = await parseOk(response!);
+    expect(body.status).toBe(200);
+    expect(body.data?.token).toEqual(expect.any(String));
+    expect(body.data?.userId).toEqual(expect.any(String));
+    expect(body.data?.track).toBe("WOMAN");
+    expect(env.store.users).toHaveLength(1);
+    expect(env.store.users[0]?.telegram_user_id).toBeNull();
+    expect(env.store.users[0]?.email).toBe("elena@example.com");
+    expect(env.store.users[0]?.role).toBe("user");
+    expect(env.store.profiles).toHaveLength(1);
+    expect(env.store.profiles[0]?.gender).toBe("woman");
+    expect(env.store.partner_preferences).toHaveLength(1);
+    expect(env.store.applications).toHaveLength(0);
+    expect(env.store.sessions).toHaveLength(1);
+    expect(String(env.store.sessions[0]?.token_hash)).not.toBe(String(body.data?.token));
+    expect(env.store.sessions.some((item) => item.token_hash === body.data?.token)).toBe(false);
+    const me = await parseOk(await withToken(env, "/api/me", String(body.data?.token)));
+    expect(me.data?.role).toBe("user");
+    expect(me.data?.telegramUserId).toBeNull();
+    const admin = await withToken(env, "/api/admin/dashboard", String(body.data?.token));
+    expect(admin?.status).toBe(403);
+  });
+
+  it("resumes the same web email and never attaches to a Telegram user", async () => {
+    const env = createMemoryEnv();
+    env.store.users.push({
+      id: "tg-user",
+      telegram_user_id: "1881305255",
+      email: "shared@example.com",
+      phone: null,
+      role: "admin",
+      status: "active",
+      admin_locale: "en",
+    });
+    const first = await parseOk(
+      (await webRegister(env, {
+        email: "shared@example.com",
+        firstName: "Web",
+        lastName: "User",
+        track: "MAN",
+      }))!
+    );
+    const second = await parseOk(
+      (await webRegister(env, {
+        email: "SHARED@example.com",
+        firstName: "Web",
+        lastName: "User",
+        track: "MAN",
+      }))!
+    );
+    expect(first.data?.userId).toBe(second.data?.userId);
+    expect(first.data?.userId).not.toBe("tg-user");
+    expect(env.store.users.filter((item) => item.email === "shared@example.com")).toHaveLength(2);
+    expect(env.store.users.find((item) => item.id === first.data?.userId)?.telegram_user_id).toBeNull();
+    expect(env.store.users.find((item) => item.id === "tg-user")?.telegram_user_id).toBe("1881305255");
+  });
+
+  it("merges profile and preference details and persists step/consent", async () => {
+    const env = createMemoryEnv();
+    const registered = await parseOk(
+      (await webRegister(env, {
+        email: "draft@example.com",
+        firstName: "Draft",
+        lastName: "User",
+        track: "MAN",
+      }))!
+    );
+    const token = String(registered.data?.token);
+    await withToken(env, "/api/profile", token, {
+      method: "PATCH",
+      body: JSON.stringify({
+        details: { nationality: "ES", religion: "none" },
+        current_step: 3,
+      }),
+    });
+    const merged = await parseOk(
+      (await withToken(env, "/api/profile", token, {
+        method: "PATCH",
+        body: JSON.stringify({
+          details: { smoking: "no" },
+          privacy_accepted: true,
+          terms_accepted: true,
+          current_step: 4,
+          about: "A".repeat(4000),
+        }),
+      }))!
+    );
+    expect(merged.data?.details).toMatchObject({
+      nationality: "ES",
+      religion: "none",
+      smoking: "no",
+    });
+    expect(merged.data?.current_step).toBe(4);
+    expect(merged.data?.privacy_accepted_at).toEqual(expect.any(String));
+    expect(merged.data?.terms_accepted_at).toEqual(expect.any(String));
+    expect(String(merged.data?.about)).toHaveLength(4000);
+
+    await withToken(env, "/api/preferences", token, {
+      method: "PATCH",
+      body: JSON.stringify({ intent: "marriage", details: { preferredHeightMin: 170 } }),
+    });
+    const prefs = await parseOk(
+      (await withToken(env, "/api/preferences", token, {
+        method: "PATCH",
+        body: JSON.stringify({ details: { dealBreakers: "smoking" } }),
+      }))!
+    );
+    expect(prefs.data?.intent).toBe("marriage");
+    expect(prefs.data?.details).toMatchObject({
+      preferredHeightMin: 170,
+      dealBreakers: "smoking",
+    });
+  });
+
+  it("requires photo and consent before website submit, then creates an application", async () => {
+    const env = createMemoryEnv();
+    const registered = await parseOk(
+      (await webRegister(env, {
+        email: "submit@example.com",
+        firstName: "Submit",
+        lastName: "User",
+        track: "WOMAN",
+      }))!
+    );
+    const token = String(registered.data?.token);
+    const noConsent = await parseOk(
+      (await withToken(env, "/api/profile/submit", token, { method: "POST", body: "{}" }))!
+    );
+    expect(noConsent.status).toBe(400);
+    expect(noConsent.error?.message).toMatch(/privacy|terms/i);
+    expect(env.store.applications).toHaveLength(0);
+
+    await withToken(env, "/api/profile", token, {
+      method: "PATCH",
+      body: JSON.stringify({ privacy_accepted: true, terms_accepted: true, first_name: "Submit" }),
+    });
+    const noPhoto = await parseOk(
+      (await withToken(env, "/api/profile/submit", token, { method: "POST", body: "{}" }))!
+    );
+    expect(noPhoto.status).toBe(400);
+    expect(noPhoto.error?.code).toBe("PHOTO_REQUIRED");
+    expect(env.store.applications).toHaveLength(0);
+
+    const file = new File([jpegBytes()], "face.jpg", { type: "image/jpeg" });
+    const form = new FormData();
+    form.set("file", file);
+    const uploaded = await withToken(env, "/api/photos", token, { method: "POST", body: form });
+    expect(uploaded?.status).toBe(200);
+    const photoBody = await parseOk(uploaded!);
+    expect(photoBody.data?.id).toEqual(expect.any(String));
+    expect(String(env.store.photos[0]?.r2_key)).toMatch(/^users\/.+\/.+\.jpg$/);
+
+    const submitted = await parseOk(
+      (await withToken(env, "/api/profile/submit", token, { method: "POST", body: "{}" }))!
+    );
+    expect(submitted.status).toBe(200);
+    expect(env.store.applications).toHaveLength(1);
+    expect(env.store.applications[0]?.source).toBe("website");
+    expect(env.store.applications[0]?.user_id).toBe(registered.data?.userId);
+    expect(env.store.profiles[0]?.status).toBe("pending");
+
+    const again = await parseOk(
+      (await withToken(env, "/api/profile/submit", token, { method: "POST", body: "{}" }))!
+    );
+    expect(again.status).toBe(200);
+    expect(env.store.applications).toHaveLength(1);
+  });
+
+  it("keeps Telegram auth, Mini App profile payload and photo upload working", async () => {
+    const env = createMemoryEnv();
+    const initData = await signedInitData(env.TELEGRAM_BOT_TOKEN, 42, "Maria");
+    const auth = await parseOk(
+      (await handleApi(
+        new Request("https://example.com/api/auth/telegram", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ initData }),
+        }),
+        env,
+        "/api/auth/telegram"
+      ))!
+    );
+    expect(auth.status).toBe(200);
+    expect(auth.data?.token).toEqual(expect.any(String));
+    const token = String(auth.data?.token);
+    const user = env.store.users.find((item) => item.telegram_user_id === "42");
+    expect(user?.role).toBe("user");
+
+    const profile = await parseOk(
+      (await withToken(env, "/api/profile", token, {
+        method: "PATCH",
+        body: JSON.stringify({ first_name: "Maria", about: "Private introduction", age: 32 }),
+      }))!
+    );
+    expect(profile.status).toBe(200);
+    expect(profile.data?.first_name).toBe("Maria");
+    expect(profile.data?.about).toBe("Private introduction");
+    expect(profile.data?.age).toBe(32);
+
+    const file = new File([jpegBytes()], "face.jpg", { type: "image/jpeg" });
+    const form = new FormData();
+    form.set("file", file);
+    const uploaded = await withToken(env, "/api/photos", token, { method: "POST", body: form });
+    expect(uploaded?.status).toBe(200);
+
+    await withToken(env, "/api/profile", token, {
+      method: "PATCH",
+      body: JSON.stringify({ privacy_accepted: true, terms_accepted: true }),
+    });
+    const submitted = await parseOk(
+      (await withToken(env, "/api/profile/submit", token, { method: "POST", body: "{}" }))!
+    );
+    expect(submitted.status).toBe(200);
+    expect(env.store.applications[0]?.source).toBe("miniapp");
+  });
+
+  it("does not grant admin to a website user even with an admin-looking email", async () => {
+    const env = createMemoryEnv();
+    const registered = await parseOk(
+      (await webRegister(env, {
+        email: "admin@example.com",
+        firstName: "Not",
+        lastName: "Admin",
+        track: "MAN",
+      }))!
+    );
+    const me = await parseOk(await withToken(env, "/api/me", String(registered.data?.token)));
+    expect(me.data?.role).toBe("user");
+    const dashboard = await withToken(env, "/api/admin/dashboard", String(registered.data?.token));
+    expect(dashboard?.status).toBe(403);
+  });
+});
+

@@ -113,13 +113,17 @@ export async function createApplication(
     source: string;
     userId?: string | null;
     silent?: boolean;
+    reuse?: boolean;
   }
 ): Promise<{ application: ApplicationRow; notified: boolean; reused: boolean }> {
-  const existing = await findReusableApplication(env, {
-    email: input.email,
-    phone: input.phone,
-    userId: input.userId,
-  });
+  const existing =
+    input.reuse === false
+      ? null
+      : await findReusableApplication(env, {
+          email: input.email,
+          phone: input.phone,
+          userId: input.userId,
+        });
   if (existing) {
     console.log("applications.reuse", {
       id: existing.id,
