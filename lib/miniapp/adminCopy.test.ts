@@ -15,7 +15,14 @@ describe("admin panel i18n", () => {
     expect(adminCopy.ru.nav.content).toBe("Контент сайта");
     expect(adminCopy.ru.actions.approve).toBe("Одобрить");
     expect(adminCopy.ru.applicant.profile).toBe("Профиль");
-    expect(adminCopy.ru.applicant.lifeGoals).toBe("Цели в жизни");
+    expect(adminCopy.ru.applicant.lifeGoals).toBe("Цели жизни");
+    expect(adminCopy.ru.applicant.dealBreakers).toBe("Что неприемлемо");
+    expect(adminCopy.ru.applicant.empty).toBe("Не указано");
+    expect(adminCopy.en.applicant.application).toBe("Application");
+    expect(adminCopy.es.applicant.application).toBe("Solicitud");
+    expect(adminCopy.ru.applicant.application).toBe("Заявка");
+    expect(adminCopy.en.applicant.source).toBe("Source");
+    expect(adminCopy.es.applicant.empty).toBe("No indicado");
     expect(adminCopy.en.applicant.hobbies).toBe("Hobbies");
     expect(adminCopy.ru.blog.new).toBe("Новый блог");
     expect(adminCopy.es.blog.unpublish).toBe("Ocultar");

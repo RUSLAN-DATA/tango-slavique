@@ -271,7 +271,7 @@ export function MiniAppShell() {
 
   if (adminMode && me.role === "admin") {
     return (
-      <div className="mx-auto min-h-screen max-w-lg pb-10">
+      <div className="mx-auto min-h-screen max-w-lg overflow-y-auto pb-16">
         <header className="px-5 pb-2 pt-6">
           {error ? <p className="text-sm text-red-300">{error}</p> : null}
         </header>

@@ -12,10 +12,10 @@ import {
   type AdminLocale,
 } from "@/lib/miniapp/adminCopy";
 import {
-  applicantSections,
-  displayApplicantValue,
+  applicantFromProfileRecord,
   type ApplicantProfileView,
 } from "@/lib/miniapp/applicantProfileView";
+import { ApplicantQuestionnaire } from "@/components/miniapp/ApplicantQuestionnaire";
 import { contentPages, contentFields, defaultContentValue, type ContentField } from "@/lib/content/catalog";
 import { parseArticleMarkdown } from "@/lib/blog/format";
 import { ArticleBody } from "@/components/blog/ArticleBody";
@@ -137,12 +137,18 @@ export function AdminPanel({ startParam, onExit, locale: localeProp, onLocaleCha
     name?: string;
     city?: string;
     message?: string;
+    email?: string;
+    phone?: string;
     status?: string;
     source?: string;
+    created_at?: string;
+    updated_at?: string;
+    user_id?: string;
     applicant?: ApplicantProfileView;
     photos?: Array<{
       id: string;
       photo_status?: string;
+      status?: string;
       review?: {
         status: string;
         issues?: Array<{ message?: string; type?: string }>;
@@ -281,27 +287,83 @@ export function AdminPanel({ startParam, onExit, locale: localeProp, onLocaleCha
         name?: string;
         city?: string;
         message?: string;
+        email?: string;
+        phone?: string;
         status?: string;
         source?: string;
+        created_at?: string;
+        updated_at?: string;
+        user_id?: string;
         applicant?: ApplicantProfileView;
-        photos?: Array<{ id: string; photo_status?: string; review?: { status: string } | null }>;
+        photos?: Array<{
+          id: string;
+          photo_status?: string;
+          status?: string;
+          review?: {
+            status: string;
+            issues?: Array<{ message?: string; type?: string }>;
+            quality?: string | null;
+            face_visible?: boolean;
+            main_person_detected?: boolean;
+            admin_override?: string | null;
+            has_annotation?: boolean;
+          } | null;
+        }>;
       }>(`/api/applications/${selectedId}`).then((res) => {
         if (res.ok) setApplication(res.data || null);
       });
     }
     if (section === "profiles") {
-      void workerRequest<{
-        profile: Record<string, string | number | null>;
-        notes: Array<Record<string, string>>;
-        photos: Array<{ id: string; status: string }>;
-      }>(`/api/admin/profiles/${selectedId}`).then((res) => {
-        if (res.ok && res.data) {
-          setProfileDetail(res.data);
-          setEditName(String(res.data.profile.first_name || ""));
-          setEditCity(String(res.data.profile.city || ""));
-          setEditAbout(String(res.data.profile.about || ""));
+      void (async () => {
+        const res = await workerRequest<{
+          profile: Record<string, string | number | null>;
+          notes: Array<Record<string, string>>;
+          photos: Array<{ id: string; photo_status?: string; status: string }>;
+        }>(`/api/admin/profiles/${selectedId}`);
+        if (!res.ok || !res.data) {
+          return;
         }
-      });
+        setProfileDetail(res.data);
+        setEditName(String(res.data.profile.first_name || ""));
+        setEditCity(String(res.data.profile.city || ""));
+        setEditAbout(String(res.data.profile.about || ""));
+        const userId = String(res.data.profile.user_id || selectedId);
+        const list = await workerRequest<{ items: Array<Record<string, string>> }>("/api/applications?status=all");
+        const match = (list.data?.items || []).find((item) => item.user_id === userId);
+        if (!match?.id) {
+          setApplication(null);
+          return;
+        }
+        const assembled = await workerRequest<{
+          id?: string;
+          name?: string;
+          city?: string;
+          message?: string;
+          status?: string;
+          source?: string;
+          created_at?: string;
+          updated_at?: string;
+          user_id?: string;
+          applicant?: ApplicantProfileView;
+          photos?: Array<{
+            id: string;
+            photo_status?: string;
+            status?: string;
+            review?: {
+              status: string;
+              issues?: Array<{ message?: string; type?: string }>;
+              quality?: string | null;
+              face_visible?: boolean;
+              main_person_detected?: boolean;
+              admin_override?: string | null;
+              has_annotation?: boolean;
+            } | null;
+          }>;
+        }>(`/api/applications/${match.id}`);
+        if (assembled.ok) {
+          setApplication(assembled.data || null);
+        }
+      })();
     }
     if (section === "matches") {
       void workerRequest<{ match: Record<string, unknown>; responses: unknown[] }>(
@@ -478,7 +540,7 @@ export function AdminPanel({ startParam, onExit, locale: localeProp, onLocaleCha
       ) : null}
 
       {section === "applications" && selectedId ? (
-        <div className="space-y-4">
+        <div className="space-y-4 pb-16">
           <button className="min-h-11 text-xs uppercase text-ivory/50" type="button" onClick={() => setSelectedId("")}>
             {t.back}
           </button>
@@ -487,66 +549,15 @@ export function AdminPanel({ startParam, onExit, locale: localeProp, onLocaleCha
             {[application?.applicant?.basic?.city || application?.city, application?.source].filter(Boolean).join(" · ")}
           </p>
           <p className="text-xs uppercase text-gold">{statusLabel(t, application?.status)}</p>
-          {applicantSections(application?.applicant).map((sectionItem) => (
-            <section key={sectionItem.id} className="space-y-2 border border-white/10 p-4">
-              <p className="text-xs uppercase tracking-[0.14em] text-gold">{t.applicant[sectionItem.id]}</p>
-              {sectionItem.fields.map((field) => (
-                <div key={field.key} className="text-sm">
-                  <p className="text-ivory/50">{t.applicant[field.key as keyof typeof t.applicant]}</p>
-                  <p className="whitespace-pre-wrap text-ivory/90">
-                    {displayApplicantValue(field.value, {
-                      yes: t.photo.yes,
-                      no: t.photo.no,
-                      empty: t.applicant.empty,
-                    })}
-                  </p>
-                </div>
-              ))}
-            </section>
-          ))}
-          <section className="space-y-3 border border-white/10 p-4">
-            <p className="text-xs uppercase tracking-[0.14em] text-gold">{t.applicant.photos}</p>
-            {application?.photos?.length ? (
-              application.photos.map((photo) => (
-                <article key={photo.id} className="border border-white/10 p-3">
-                  <PhotoThumb id={photo.id} large />
-                  {photo.review?.has_annotation ? <AnnotationThumb id={photo.id} /> : null}
-                  <p className="mt-2 text-xs uppercase text-gold">
-                    {statusLabel(t, photo.review?.status || photo.photo_status)}
-                  </p>
-                  {photo.review?.status === "AI_UNAVAILABLE" ? (
-                    <p className="mt-2 text-sm text-ivory/70">{t.photo.unavailable}</p>
-                  ) : null}
-                  {photo.review ? (
-                    <div className="mt-2 space-y-1 text-sm text-ivory/70">
-                      <p className="text-xs uppercase tracking-[0.14em] text-gold">{t.applicant.photoReview}</p>
-                      <p>
-                        {t.photo.face}: {photo.review.face_visible ? t.photo.yes : t.photo.no}
-                      </p>
-                      <p>
-                        {t.photo.person}: {photo.review.main_person_detected ? t.photo.yes : t.photo.no}
-                      </p>
-                      <p>
-                        {t.photo.quality}: {photo.review.quality || t.applicant.empty}
-                      </p>
-                      {photo.review.admin_override ? (
-                        <p>
-                          {t.photo.decision}: {statusLabel(t, photo.review.admin_override)}
-                        </p>
-                      ) : null}
-                      {photo.review.issues?.map((issue, index) => (
-                        <p key={`${photo.id}-issue-${index}`}>{issue.message || issue.type}</p>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="mt-2 text-sm text-ivory/60">{t.photo.waiting}</p>
-                  )}
-                </article>
-              ))
-            ) : (
-              <p className="text-sm text-ivory/50">{t.applicant.noPhotos}</p>
-            )}
-          </section>
+          <ApplicantQuestionnaire
+            t={t}
+            applicant={application?.applicant}
+            photos={application?.photos}
+            application={application}
+            statusOf={(value) => statusLabel(t, value)}
+            renderPhoto={(id, large) => <PhotoThumb id={id} large={large} />}
+            renderAnnotation={(id) => <AnnotationThumb id={id} />}
+          />
           <p className="text-sm text-ivory/60">{t.infoHint}</p>
           <textarea
             className={`${field} py-3`}
@@ -602,7 +613,7 @@ export function AdminPanel({ startParam, onExit, locale: localeProp, onLocaleCha
 
       {section === "profiles" && selectedId && profileDetail ? (
         <form
-          className="space-y-4"
+          className="space-y-4 pb-16"
           onSubmit={(event: FormEvent) => {
             event.preventDefault();
             void act(`/api/admin/profiles/${selectedId}`, {
@@ -614,7 +625,42 @@ export function AdminPanel({ startParam, onExit, locale: localeProp, onLocaleCha
           <button className="min-h-11 text-xs uppercase text-ivory/50" type="button" onClick={() => setSelectedId("")}>
             {t.back}
           </button>
-          {profileDetail.photos[0] ? <PhotoThumb id={profileDetail.photos[0].id} large /> : null}
+          {profileDetail.photos[0] ? <PhotoThumb id={profileDetail.photos[0].id} large /> : application?.photos?.[0] ? <PhotoThumb id={application.photos[0].id} large /> : null}
+          <p className="font-display text-3xl">
+            {application?.applicant?.basic?.firstName || String(profileDetail.profile.first_name || "")}
+          </p>
+          <p className="text-ivory/60">
+            {[application?.applicant?.basic?.city || profileDetail.profile.city, application?.source].filter(Boolean).join(" · ")}
+          </p>
+          <ApplicantQuestionnaire
+            t={t}
+            applicant={
+              application?.applicant ||
+              applicantFromProfileRecord(profileDetail.profile as Record<string, unknown>, {
+                phone: application?.phone || null,
+                email: application?.email || null,
+              })
+            }
+            photos={application?.photos?.length ? application.photos : profileDetail.photos}
+            application={
+              application || {
+                status: typeof profileDetail.profile.status === "string" ? profileDetail.profile.status : null,
+              }
+            }
+            statusOf={(value) => statusLabel(t, value)}
+            renderPhoto={(id, large) => <PhotoThumb id={id} large={large} />}
+            renderAnnotation={(id) => <AnnotationThumb id={id} />}
+            photoActions={(photo) => (
+              <div className="flex items-center gap-3 pt-2">
+                <button className="min-h-11 text-xs uppercase text-gold" type="button" disabled={busy} onClick={() => void act(`/api/photos/${photo.id}/approve`, { method: "POST" })}>
+                  {t.actions.useAnyway}
+                </button>
+                <button className="min-h-11 text-xs uppercase text-ivory/50" type="button" disabled={busy} onClick={() => void act(`/api/photos/${photo.id}/reject`, { method: "POST" })}>
+                  {t.actions.reject}
+                </button>
+              </div>
+            )}
+          />
           <input className={field} value={editName} onChange={(e) => setEditName(e.target.value)} placeholder={t.fields.name} />
           <input className={field} value={editCity} onChange={(e) => setEditCity(e.target.value)} placeholder={t.fields.city} />
           <textarea className={`${field} py-3`} rows={4} value={editAbout} onChange={(e) => setEditAbout(e.target.value)} placeholder={t.fields.about} />
@@ -628,19 +674,6 @@ export function AdminPanel({ startParam, onExit, locale: localeProp, onLocaleCha
             <button className={ghostBtn} type="button" disabled={busy} onClick={() => void act(`/api/admin/profiles/${selectedId}`, { method: "PATCH", body: JSON.stringify({ status: "hidden" }) })}>
               {t.actions.hide}
             </button>
-          </div>
-          <div className="space-y-2">
-            {profileDetail.photos.map((photo) => (
-              <div key={photo.id} className="flex items-center gap-3 border border-white/10 p-2">
-                <PhotoThumb id={photo.id} />
-                <button className="min-h-11 text-xs uppercase text-gold" type="button" disabled={busy} onClick={() => void act(`/api/photos/${photo.id}/approve`, { method: "POST" })}>
-                  {t.actions.useAnyway}
-                </button>
-                <button className="min-h-11 text-xs uppercase text-ivory/50" type="button" disabled={busy} onClick={() => void act(`/api/photos/${photo.id}/reject`, { method: "POST" })}>
-                  {t.actions.reject}
-                </button>
-              </div>
-            ))}
           </div>
           <div className="space-y-2">
             <p className="text-xs uppercase tracking-[0.14em] text-gold">{t.nav.notes}</p>

@@ -11,7 +11,7 @@ export default function MiniAppLayout({
         src="https://telegram.org/js/telegram-web-app.js"
         strategy="beforeInteractive"
       />
-      <div className="min-h-screen bg-[#070709]">{children}</div>
+      <div className="min-h-screen overflow-y-auto bg-[#070709]">{children}</div>
     </>
   );
 }
