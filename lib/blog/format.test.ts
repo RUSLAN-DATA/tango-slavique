@@ -30,4 +30,12 @@ describe("blog structured text", () => {
       ])
     ).toBe("**Private** matchmaking");
   });
+
+  it("turns a fully bold Telegram line into a heading", () => {
+    expect(
+      telegramEntitiesToMarkdown("Why discretion matters", [{ type: "bold", offset: 0, length: 22 }])
+    ).toBe("# Why discretion matters");
+    const parsed = parseArticleMarkdown("A title\n**Why discretion matters**\nA **private** circle.");
+    expect(parsed.blocks[0]).toEqual({ type: "heading", text: "Why discretion matters" });
+  });
 });

@@ -99,6 +99,7 @@ const en = {
     generateEn: "Prepare English",
     generateEs: "Prepare Spanish",
     sendInfo: "Send request",
+    whatsapp: "WhatsApp",
   },
   filters: {
     pending: "Pending",
@@ -389,6 +390,7 @@ export const adminCopy = {
       generateEn: "Preparar inglés",
       generateEs: "Preparar español",
       sendInfo: "Enviar petición",
+      whatsapp: "WhatsApp",
     },
     filters: {
       pending: "Pendientes",
@@ -676,6 +678,7 @@ export const adminCopy = {
       generateEn: "Подготовить английский",
       generateEs: "Подготовить испанский",
       sendInfo: "Отправить запрос",
+      whatsapp: "WhatsApp",
     },
     filters: {
       pending: "Ожидают",

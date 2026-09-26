@@ -16,6 +16,7 @@ import {
 } from "../blog/service";
 import { clearWorkflow, getWorkflow, setWorkflow, workflowExtra } from "../workflows/service";
 import {
+  listContent,
   cancelContentDraft,
   contentFieldById,
   contentFieldsForPage,
@@ -25,6 +26,7 @@ import {
   displayContentValue,
 } from "../content/service";
 import { contentPages } from "../../../lib/content/catalog";
+import { whatsappMeUrl } from "../../../lib/contact/whatsapp";
 import { updateApplicationStatus } from "../applications/service";
 import { sendTelegramMessage, sendTelegramPhotoFile } from "./api";
 import type { SiteLocale } from "../blog/language";
@@ -211,7 +213,18 @@ export async function handleCmsMessage(
     }
     await updateApplicationStatus(env, extra.applicationId, "info_requested", adminId, text.trim());
     await clearWorkflow(env, adminId);
-    await reply(env, chatId, t.needInfoSaved);
+    const application = await env.DB.prepare("SELECT phone, email, name FROM applications WHERE id = ?")
+      .bind(extra.applicationId)
+      .first<{ phone: string | null; email: string | null; name: string | null }>();
+    const whatsapp = whatsappMeUrl(
+      application?.phone,
+      text.trim() || "Tango Slavique: we need a little more information about your application."
+    );
+    await reply(
+      env,
+      chatId,
+      [t.needInfoSaved, whatsapp ? `WhatsApp:\n${whatsapp}` : t.needInfoWhatsappMissing].filter(Boolean).join("\n\n")
+    );
     return true;
   }
   if (!flow) {
@@ -438,12 +451,19 @@ export async function handleCmsCallback(
       extra: { page },
     });
     const fields = contentFieldsForPage(page);
+    const rows = await listContent(env, page);
+    const previewLocale: "en" | "es" = locale === "es" ? "es" : "en";
     await reply(env, chatId, t.contentPick, {
       reply_markup: {
         inline_keyboard: [
-          ...fields.map((field) => [
-            { text: field.label[locale], callback_data: `c:fd:${field.id}` },
-          ]),
+          ...fields.map((field) => {
+            const row = rows.find((item) => item.id === `${field.id}:${previewLocale}`) || null;
+            const preview = displayContentValue(row, field, previewLocale)
+              .replace(/\s+/g, " ")
+              .trim();
+            const text = (preview ? `${field.label[locale]}: ${preview}` : field.label[locale]).slice(0, 64);
+            return [{ text, callback_data: `c:fd:${field.id}` }];
+          }),
           [{ text: `↩️ ${t.back}`, callback_data: "c:home" }],
         ],
       },

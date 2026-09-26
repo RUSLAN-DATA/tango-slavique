@@ -16,6 +16,7 @@ import {
   type ApplicantProfileView,
 } from "@/lib/miniapp/applicantProfileView";
 import { ApplicantQuestionnaire } from "@/components/miniapp/ApplicantQuestionnaire";
+import { whatsappMeUrl } from "@/lib/contact/whatsapp";
 import { contentPages, contentFields, defaultContentValue, type ContentField } from "@/lib/content/catalog";
 import { parseArticleMarkdown } from "@/lib/blog/format";
 import { ArticleBody } from "@/components/blog/ArticleBody";
@@ -589,6 +590,18 @@ export function AdminPanel({ startParam, onExit, locale: localeProp, onLocaleCha
               {t.actions.sendInfo}
             </button>
           </div>
+          {whatsappMeUrl(application?.applicant?.basic?.phone || application?.phone, infoDraft) ? (
+            <a
+              className={ghostBtn + " block text-center"}
+              href={whatsappMeUrl(application?.applicant?.basic?.phone || application?.phone, infoDraft) || "#"}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {t.actions.whatsapp}
+            </a>
+          ) : (
+            <p className="text-sm text-ivory/50">{t.applicant.phone}: {t.applicant.empty}</p>
+          )}
         </div>
       ) : null}
 

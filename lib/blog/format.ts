@@ -62,8 +62,19 @@ export function splitTitleBody(source: string): { title: string; body: string } 
   return { title, body };
 }
 
+function promoteBoldHeadings(source: string): string {
+  return source
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => {
+      const heading = line.trim().match(/^\*\*(.+)\*\*$/);
+      return heading ? `# ${heading[1].trim()}` : line;
+    })
+    .join("\n");
+}
+
 export function parseArticleMarkdown(source: string): ParsedArticle {
-  const normalized = source.replace(/\r\n/g, "\n").trim();
+  const normalized = promoteBoldHeadings(source.replace(/\r\n/g, "\n")).trim();
   if (!normalized) {
     return { title: "", subtitle: "", blocks: [] };
   }
@@ -142,8 +153,12 @@ export function telegramEntitiesToMarkdown(
     } else if (entity.type === "italic" || entity.type === "emphasis") {
       marks.push({ index: start, token: "*", order });
       marks.push({ index: end, token: "*", order });
-    } else if (entity.type === "blockquote") {
+    } else if (entity.type === "blockquote" || entity.type === "expandable_blockquote") {
       marks.push({ index: start, token: "> ", order });
+    } else if (entity.type === "h1" || entity.type === "heading_1") {
+      marks.push({ index: start, token: "# ", order });
+    } else if (entity.type === "h2" || entity.type === "heading_2" || entity.type === "h3" || entity.type === "heading_3") {
+      marks.push({ index: start, token: "## ", order });
     }
   });
   marks.sort((a, b) => b.index - a.index || b.order - a.order);
@@ -151,5 +166,5 @@ export function telegramEntitiesToMarkdown(
   for (const mark of marks) {
     result = result.slice(0, mark.index) + mark.token + result.slice(mark.index);
   }
-  return result;
+  return promoteBoldHeadings(result);
 }

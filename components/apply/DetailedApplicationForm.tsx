@@ -20,6 +20,82 @@ function asString(value: unknown) {
   return String(value);
 }
 
+function WizardField({
+  label,
+  value,
+  locked,
+  type = "text",
+  textarea = false,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  locked: boolean;
+  type?: string;
+  textarea?: boolean;
+  onChange: (value: string) => void;
+}) {
+  const inputType = type === "number" ? "text" : type;
+  return (
+    <label className="block">
+      <span className={labelClass}>{label}</span>
+      {textarea ? (
+        <textarea
+          disabled={locked}
+          rows={5}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          className={fieldClass}
+        />
+      ) : (
+        <input
+          disabled={locked}
+          type={inputType}
+          inputMode={type === "number" ? "numeric" : undefined}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          className={fieldClass}
+        />
+      )}
+    </label>
+  );
+}
+
+function WizardSelect({
+  label,
+  value,
+  locked,
+  placeholder,
+  choices,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  locked: boolean;
+  placeholder: string;
+  choices: Array<{ value: string; label: string }>;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block">
+      <span className={labelClass}>{label}</span>
+      <select
+        disabled={locked}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className={`${fieldClass} appearance-none`}
+      >
+        <option value="">{placeholder}</option>
+        {choices.map((item) => (
+          <option key={item.value} value={item.value}>
+            {item.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 export function DetailedApplicationForm({ track }: { track: ApplyTrack }) {
   const { t, locale } = useLanguage();
   const router = useRouter();
@@ -127,6 +203,48 @@ export function DetailedApplicationForm({ track }: { track: ApplyTrack }) {
   }, [locale, router, track]);
 
   const locked = status !== "DRAFT" && status !== "NEEDS_MORE_INFO";
+  const options = copy as typeof copy & {
+    incomplete?: string;
+    choose?: string;
+    bodyOptions?: Array<{ value: string; label: string }>;
+    hairOptions?: Array<{ value: string; label: string }>;
+    eyeOptions?: Array<{ value: string; label: string }>;
+    maritalOptions?: Array<{ value: string; label: string }>;
+    religionOptions?: Array<{ value: string; label: string }>;
+    educationOptions?: Array<{ value: string; label: string }>;
+    smokingOptions?: Array<{ value: string; label: string }>;
+    alcoholOptions?: Array<{ value: string; label: string }>;
+    childrenOptions?: Array<{ value: string; label: string }>;
+    wantsChildrenOptions?: Array<{ value: string; label: string }>;
+    prefBodyOptions?: Array<{ value: string; label: string }>;
+  };
+
+  function filled(name: string) {
+    const value = formRef.current[name];
+    if (typeof value === "boolean") {
+      return value;
+    }
+    return asString(value).trim().length > 0;
+  }
+
+  function stepComplete(currentStep: number) {
+    const required: Record<number, string[]> = {
+      1: ["firstName", "lastName", "phone", "dateOfBirth", "city", "country"],
+      2: ["heightCm", "weightKg", "bodyType", "hairColor", "eyeColor"],
+      3: ["nationality", "maritalStatus", "education", "profession", "languages"],
+      4: ["smoking", "alcohol", "children", "wantsChildren"],
+      5: ["aboutMe", "hobbies", "lifeGoals", "relationshipExperience"],
+      6: ["preferredAgeMin", "preferredAgeMax", "preferredHeightMin", "preferredHeightMax", "preferredBodyType", "minimumEducation"],
+      7: ["privacyAccepted", "termsAccepted"],
+    };
+    if ((required[currentStep] || []).some((name) => !filled(name))) {
+      return false;
+    }
+    if (currentStep === 1 && photos.length < 1) {
+      return false;
+    }
+    return true;
+  }
 
   function draftPayload(nextStep = step) {
     const current = formRef.current;
@@ -166,6 +284,10 @@ export function DetailedApplicationForm({ track }: { track: ApplyTrack }) {
   }
 
   async function go(nextStep: number) {
+    if (nextStep > step && !stepComplete(step)) {
+      setMessage(options.incomplete || t.form.submitError);
+      return;
+    }
     const saved = await save(nextStep);
     if (!saved) {
       return;
@@ -185,6 +307,10 @@ export function DetailedApplicationForm({ track }: { track: ApplyTrack }) {
   }
 
   async function submit() {
+    if ([1, 2, 3, 4, 5, 6, 7].some((item) => !stepComplete(item))) {
+      setMessage(photos.length < 1 ? copy.needPhoto : options.incomplete || t.form.submitError);
+      return;
+    }
     setSaving(true);
     setMessage("");
     const response = await fetch("/api/account/application", {
@@ -202,38 +328,33 @@ export function DetailedApplicationForm({ track }: { track: ApplyTrack }) {
     setStatus("SUBMITTED");
   }
 
-  function Field({
-    name,
-    label,
-    type = "text",
-    textarea = false,
-  }: {
-    name: string;
-    label: string;
-    type?: string;
-    textarea?: boolean;
-  }) {
+  function setText(name: string, type: string | undefined, next: string) {
+    setField(name, type === "number" && next !== "" ? Number(next) : next);
+  }
+
+  function textField(name: string, label: string, type?: string, textarea = false) {
     return (
-      <label className="block">
-        <span className={labelClass}>{label}</span>
-        {textarea ? (
-          <textarea
-            disabled={locked}
-            rows={5}
-            value={asString(form[name])}
-            onChange={(event) => setField(name, event.target.value)}
-            className={fieldClass}
-          />
-        ) : (
-          <input
-            disabled={locked}
-            type={type}
-            value={asString(form[name])}
-            onChange={(event) => setField(name, event.target.value)}
-            className={fieldClass}
-          />
-        )}
-      </label>
+      <WizardField
+        label={label}
+        value={asString(form[name])}
+        locked={locked}
+        type={type}
+        textarea={textarea}
+        onChange={(next) => setText(name, type, next)}
+      />
+    );
+  }
+
+  function selectField(name: string, label: string, choices?: Array<{ value: string; label: string }>) {
+    return (
+      <WizardSelect
+        label={label}
+        value={asString(form[name])}
+        locked={locked}
+        placeholder={options.choose || "—"}
+        choices={choices || []}
+        onChange={(next) => setField(name, next)}
+      />
     );
   }
 
@@ -264,16 +385,16 @@ export function DetailedApplicationForm({ track }: { track: ApplyTrack }) {
       <div className="space-y-5">
         {step === 1 ? (
           <>
-            <Field name="firstName" label={copy.firstName} />
-            <Field name="lastName" label={copy.lastName} />
+            {textField("firstName", copy.firstName)}
+            {textField("lastName", copy.lastName)}
             <label className="block">
               <span className={labelClass}>{copy.email}</span>
               <input disabled value={email} className={fieldClass} />
             </label>
-            <Field name="phone" label={copy.phone} type="tel" />
-            <Field name="dateOfBirth" label={copy.dob} type="date" />
-            <Field name="city" label={copy.city} />
-            <Field name="country" label={copy.country} />
+            {textField("phone", copy.phone, "tel")}
+            {textField("dateOfBirth", copy.dob, "date")}
+            {textField("city", copy.city)}
+            {textField("country", copy.country)}
             <div>
               <span className={labelClass}>{copy.photo}</span>
               <p className="mb-3 text-sm font-light text-ivory-muted">{t.platform.account.photoPrivate}</p>
@@ -296,62 +417,62 @@ export function DetailedApplicationForm({ track }: { track: ApplyTrack }) {
 
         {step === 2 ? (
           <>
-            <Field name="heightCm" label={copy.height} type="number" />
-            <Field name="weightKg" label={copy.weight} type="number" />
-            <Field name="bodyType" label={copy.bodyType} />
-            <Field name="hairColor" label={copy.hair} />
-            <Field name="eyeColor" label={copy.eyes} />
+            {textField("heightCm", copy.height, "number")}
+            {textField("weightKg", copy.weight, "number")}
+            {selectField("bodyType", copy.bodyType, options.bodyOptions)}
+            {selectField("hairColor", copy.hair, options.hairOptions)}
+            {selectField("eyeColor", copy.eyes, options.eyeOptions)}
           </>
         ) : null}
 
         {step === 3 ? (
           <>
-            <Field name="nationality" label={copy.nationality} />
-            <Field name="maritalStatus" label={copy.marital} />
-            <Field name="religion" label={copy.religion} />
-            <Field name="education" label={copy.education} />
-            <Field name="profession" label={copy.profession} />
-            <Field name="annualIncome" label={copy.income} />
-            <Field name="languages" label={copy.languages} />
+            {textField("nationality", copy.nationality)}
+            {selectField("maritalStatus", copy.marital, options.maritalOptions)}
+            {selectField("religion", copy.religion, options.religionOptions)}
+            {selectField("education", copy.education, options.educationOptions)}
+            {textField("profession", copy.profession)}
+            {textField("annualIncome", copy.income)}
+            {textField("languages", copy.languages)}
           </>
         ) : null}
 
         {step === 4 ? (
           <>
-            <Field name="smoking" label={copy.smoking} />
-            <Field name="alcohol" label={copy.alcohol} />
-            <Field name="children" label={copy.children} />
-            <Field name="wantsChildren" label={copy.wantsChildren} />
+            {selectField("smoking", copy.smoking, options.smokingOptions)}
+            {selectField("alcohol", copy.alcohol, options.alcoholOptions)}
+            {selectField("children", copy.children, options.childrenOptions)}
+            {selectField("wantsChildren", copy.wantsChildren, options.wantsChildrenOptions)}
           </>
         ) : null}
 
         {step === 5 ? (
           <>
-            <Field name="aboutMe" label={copy.about} textarea />
-            <Field name="hobbies" label={copy.hobbies} textarea />
-            <Field name="lifeGoals" label={copy.goals} textarea />
-            <Field name="relationshipExperience" label={copy.experience} textarea />
+            {textField("aboutMe", copy.about, undefined, true)}
+            {textField("hobbies", copy.hobbies, undefined, true)}
+            {textField("lifeGoals", copy.goals, undefined, true)}
+            {textField("relationshipExperience", copy.experience, undefined, true)}
           </>
         ) : null}
 
         {step === 6 ? (
           <>
-            <Field name="preferredAgeMin" label={copy.ageMin} type="number" />
-            <Field name="preferredAgeMax" label={copy.ageMax} type="number" />
-            <Field name="preferredHeightMin" label={copy.heightMin} type="number" />
-            <Field name="preferredHeightMax" label={copy.heightMax} type="number" />
-            <Field name="preferredBodyType" label={copy.prefBody} />
-            <Field name="minimumEducation" label={copy.minEducation} />
-            <Field name="importantQualities" label={copy.qualities} textarea />
-            <Field name="dealBreakers" label={copy.dealBreakers} textarea />
+            {textField("preferredAgeMin", copy.ageMin, "number")}
+            {textField("preferredAgeMax", copy.ageMax, "number")}
+            {textField("preferredHeightMin", copy.heightMin, "number")}
+            {textField("preferredHeightMax", copy.heightMax, "number")}
+            {selectField("preferredBodyType", copy.prefBody, options.prefBodyOptions)}
+            {selectField("minimumEducation", copy.minEducation, options.educationOptions)}
+            {textField("importantQualities", copy.qualities, undefined, true)}
+            {textField("dealBreakers", copy.dealBreakers, undefined, true)}
           </>
         ) : null}
 
         {step === 7 ? (
           <>
-            <Field name="instagram" label={copy.instagram} />
-            <Field name="telegramHandle" label={copy.telegram} />
-            <Field name="howHeard" label={copy.heard} />
+            {textField("instagram", copy.instagram)}
+            {textField("telegramHandle", copy.telegram)}
+            {textField("howHeard", copy.heard)}
             <label className="flex items-start gap-3 text-sm font-light text-ivory-muted">
               <input
                 type="checkbox"

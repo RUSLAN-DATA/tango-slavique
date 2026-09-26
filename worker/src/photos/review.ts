@@ -29,7 +29,7 @@ const PROMPT = `Analyse this dating-profile photo. Return JSON only:
 {
   "status": "OK" | "WARNING" | "REVIEW_REQUIRED",
   "confidence": 0-1,
-  "issues": [{"type":"multiple_people|small_face|blur|dark|overexposed|crop|obstruction|screenshot|unsafe|duplicate","confidence":0-1,"message":"short plain English"}],
+  "issues": [{"type":"multiple_people|small_face|blur|dark|overexposed|crop|obstruction|screenshot|unsafe|duplicate|ai_generated|stock_photo","confidence":0-1,"message":"short plain English"}],
   "main_person_detected": true,
   "face_visible": true,
   "quality": "good" | "fair" | "poor",
@@ -38,9 +38,10 @@ const PROMPT = `Analyse this dating-profile photo. Return JSON only:
   "boxes": [{"x":0,"y":0,"w":10,"h":10,"label":"person"}]
 }
 Boxes are percentages of the image (0-100).
-OK = one clear person, visible face, decent quality.
+OK = one clear real photograph of a person, visible face, decent quality, not AI-generated.
 WARNING = possible issue, human should glance.
-REVIEW_REQUIRED = multiple people, unsafe, or face not usable.
+REVIEW_REQUIRED = multiple people, unsafe, face not usable, or the image looks AI-generated or heavily filtered.
+If the photo looks synthetic, CGI, or AI-generated, set status to REVIEW_REQUIRED and add issue type ai_generated.
 Do not reject people for style, beauty, age, race, or clothing.`;
 
 function asNumber(value: unknown, fallback = 0): number {
@@ -51,10 +52,6 @@ function parseResult(raw: Record<string, unknown> | null): PhotoReviewResult | n
   if (!raw) {
     return null;
   }
-  const status =
-    raw.status === "WARNING" || raw.status === "REVIEW_REQUIRED" || raw.status === "OK"
-      ? raw.status
-      : "REVIEW_REQUIRED";
   const issues = Array.isArray(raw.issues)
     ? raw.issues
         .filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
@@ -64,6 +61,15 @@ function parseResult(raw: Record<string, unknown> | null): PhotoReviewResult | n
           message: String(item.message || "Needs a closer look"),
         }))
     : [];
+  const looksGenerated = issues.some(
+    (item) => item.type === "ai_generated" || item.type === "stock_photo"
+  );
+  const status =
+    looksGenerated
+      ? "REVIEW_REQUIRED"
+      : raw.status === "WARNING" || raw.status === "REVIEW_REQUIRED" || raw.status === "OK"
+        ? raw.status
+        : "REVIEW_REQUIRED";
   const boxes = Array.isArray(raw.boxes)
     ? raw.boxes
         .filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
